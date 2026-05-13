@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="referrer" content="no-referrer">
+    <title>XHS-Downloader Web</title>
+    <link rel="stylesheet" href="/web/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <div class="logo">
+                <span class="logo-icon">📕</span>
+                <h1>XHS-Downloader</h1>
+            </div>
+            <p class="subtitle">小红书作品在线提取工具</p>
+        </header>
+
+        <main class="main">
+            <div class="input-section">
+                <input type="text" id="urlInput" placeholder="粘贴小红书作品链接..." class="url-input">
+                <input type="text" id="cookieInput" placeholder="Cookie（可选，登录后获取）" class="cookie-input">
+                <div class="btn-group">
+                    <button id="fetchBtn" class="fetch-btn">
+                        <span class="btn-icon">🔍</span>
+                        获取信息
+                    </button>
+                    <button id="settingsBtn" class="settings-btn" title="设置">
+                        ⚙️
+                    </button>
+                </div>
+            </div>
+
+            <div id="loading" class="loading" style="display:none;">
+                <div class="spinner"></div>
+                <p>正在获取作品信息...</p>
+            </div>
+
+            <div id="result" class="result" style="display:none;">
+                <div class="result-header">
+                    <h2>作品信息</h2>
+                    <button id="copyBtn" class="copy-btn">📋 复制链接</button>
+                </div>
+
+                <div class="note-card">
+                    <div class="cover">
+                        <img id="coverImg" src="" alt="封面" referrerpolicy="no-referrer">
+                    </div>
+                    <div class="info">
+                        <h3 id="title"></h3>
+                        <p id="desc"></p>
+                        <div class="meta">
+                            <span class="author">👤 <span id="author"></span></span>
+                            <span>❤️ <span id="likeCount">0</span></span>
+                            <span>⭐ <span id="collectCount">0</span></span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="download-section">
+                    <h3>📥 下载列表</h3>
+                    <div id="downloadList" class="download-list"></div>
+                </div>
+
+                <div class="preview-section">
+                    <h3>🖼️ 图片预览</h3>
+                    <div id="previewList" class="preview-list"></div>
+                </div>
+            </div>
+
+            <div id="error" class="error" style="display:none;">
+                <div class="error-icon">⚠️</div>
+                <p id="errorMsg"></p>
+            </div>
+        </main>
+
+        <div id="settingsPanel" class="settings-panel" style="display:none;">
+            <div class="settings-content">
+                <div class="settings-header">
+                    <h3>设置</h3>
+                    <button id="closeSettings" class="close-btn">✕</button>
+                </div>
+                <div class="settings-body">
+                    <div class="setting-item">
+                        <label>下载目录</label>
+                        <input type="text" id="settingPath" placeholder="默认: Volume/Download">
+                    </div>
+                    <div class="setting-item">
+                        <label>图片格式</label>
+                        <select id="settingImageFormat">
+                            <option value="auto">自动</option>
+                            <option value="jpeg">JPEG</option>
+                            <option value="png">PNG</option>
+                            <option value="webp">WebP</option>
+                        </select>
+                    </div>
+                    <div class="setting-item">
+                        <label>视频偏好</label>
+                        <select id="settingVideoPref">
+                            <option value="resolution">画质优先</option>
+                            <option value="bitrate">码率优先</option>
+                            <option value="size">大小优先</option>
+                        </select>
+                    </div>
+                    <div class="setting-item">
+                        <label>代理</label>
+                        <input type="text" id="settingProxy" placeholder="HTTP 代理地址（可选）">
+                    </div>
+                    <button id="saveSettings" class="save-btn">保存设置</button>
+                </div>
+            </div>
+        </div>
+
+        <footer class="footer">
+            <p>XHS-Downloader Web Interface</p>
+            <p class="tips">提示：部分作品需要登录 Cookie 才能查看完整内容</p>
+        </footer>
+    </div>
+
+    <script src="/web/static/script.js"></script>
+</body>
+</html>
