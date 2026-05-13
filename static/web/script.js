@@ -33,6 +33,12 @@ class XHSWebUI {
         this.viewerPrev = this.fullViewer.querySelector('.prev');
         this.viewerNext = this.fullViewer.querySelector('.next');
         
+        // 瀑布流查看器元素
+        this.waterfallViewer = document.getElementById('waterfallViewer');
+        this.waterfallTitle = document.getElementById('waterfallTitle');
+        this.waterfallContent = document.getElementById('waterfallContent');
+        this.waterfallClose = this.waterfallViewer.querySelector('.waterfall-close');
+        
         // 状态
         this.isEditMode = false;
         this.swipeInstances = [];
@@ -104,6 +110,9 @@ class XHSWebUI {
         this.viewerPrev.onclick = (e) => { e.stopPropagation(); this.prevImage(); };
         this.viewerNext.onclick = (e) => { e.stopPropagation(); this.nextImage(); };
         this.fullViewer.onclick = () => this.closeViewer();
+        
+        // 瀑布流事件
+        this.waterfallClose.onclick = () => this.closeWaterfall();
         
         // 键盘支持
         window.addEventListener('keydown', (e) => {
@@ -213,6 +222,39 @@ class XHSWebUI {
         
         this.viewerPrev.style.visibility = this.viewerIndex === 0 ? 'hidden' : 'visible';
         this.viewerNext.style.visibility = this.viewerIndex === this.viewerList.length - 1 ? 'hidden' : 'visible';
+    }
+
+    // 瀑布流核心方法
+    openWaterfall(author, items) {
+        this.waterfallTitle.textContent = `${author} 的作品集`;
+        this.waterfallContent.innerHTML = '';
+        
+        const allImages = [];
+        items.forEach(item => {
+            if (item.data && item.data.images) {
+                allImages.push(...item.data.images.map(img => img.url));
+            }
+        });
+
+        if (allImages.length === 0) return;
+
+        allImages.forEach((url, index) => {
+            const div = document.createElement('div');
+            div.className = 'waterfall-item';
+            div.innerHTML = `<img src="${this.getMediaUrl(url)}" loading="lazy">`;
+            div.onclick = () => {
+                this.openViewer(allImages, index);
+            };
+            this.waterfallContent.appendChild(div);
+        });
+
+        this.waterfallViewer.style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+    }
+
+    closeWaterfall() {
+        this.waterfallViewer.style.display = 'none';
+        document.body.style.overflow = '';
     }
 
     toggleTheme() {
@@ -513,15 +555,15 @@ class XHSWebUI {
                     <div class="author-name-tag">
                         👤 ${author}
                         <button class="panorama-btn" title="查看该作者全景图集">🖼️ 全景视图</button>
+                        <button class="waterfall-btn" title="查看该作者瀑布流图集">🧱 瀑布视图</button>
                     </div>
                     <div class="author-work-count">${authorItems.length} 个作品</div>
                 `;
                 row.appendChild(header);
 
-                // 全景按钮逻辑
+                // 按钮逻辑
                 header.querySelector('.panorama-btn').onclick = (e) => {
                     e.stopPropagation();
-                    // 收集该作者所有作品的所有图片
                     const allImages = [];
                     authorItems.forEach(item => {
                         if (item.data && item.data.images) {
@@ -529,6 +571,11 @@ class XHSWebUI {
                         }
                     });
                     this.openViewer(allImages);
+                };
+
+                header.querySelector('.waterfall-btn').onclick = (e) => {
+                    e.stopPropagation();
+                    this.openWaterfall(author, authorItems);
                 };
 
                 // 滑动视口

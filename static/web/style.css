@@ -450,12 +450,27 @@ body {
     gap: 0.4vw;
 }
 
-.panorama-btn:hover {
-    transform: scale(1.05);
-    box-shadow: 0 0.6vh 1.5vh rgba(255, 36, 66, 0.3);
+.waterfall-btn {
+    background: linear-gradient(135deg, #722ed1, #9254de);
+    color: white;
+    border: none;
+    padding: 0.4vh 1.2vw;
+    border-radius: 2vh;
+    font-size: 1.1vh;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 0.4vh 1vh rgba(114, 46, 209, 0.2);
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 0.4vw;
 }
 
-.panorama-btn:active {
+.panorama-btn:hover, .waterfall-btn:hover {
+    transform: scale(1.05);
+}
+
+.panorama-btn:active, .waterfall-btn:active {
     transform: scale(0.95);
 }
 
@@ -901,4 +916,106 @@ body {
 
 @media (max-width: 768px) {
     .viewer-nav { display: none; } /* 移动端靠滑动，隐藏按钮 */
+}
+
+/* 瀑布流查看器样式 */
+.waterfall-viewer {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 2500;
+    background-color: var(--bg-color);
+    display: flex;
+    flex-direction: column;
+    animation: slideInUp 0.3s cubic-bezier(0.2, 0, 0.2, 1);
+}
+
+@keyframes slideInUp {
+    from { transform: translateY(100%); }
+    to { transform: translateY(0); }
+}
+
+.waterfall-header {
+    height: calc(7vh + env(safe-area-inset-top));
+    padding-top: env(safe-area-inset-top);
+    padding-left: 5vw;
+    padding-right: 5vw;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background-color: rgba(var(--sidebar-bg-rgb, 255, 255, 255), 0.85);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-bottom: 1px solid var(--border-color);
+    z-index: 10;
+}
+
+[data-theme="dark"] .waterfall-header {
+    background-color: rgba(30, 30, 30, 0.85);
+}
+
+.waterfall-title-group {
+    display: flex;
+    align-items: center;
+    gap: 2vw;
+}
+
+.waterfall-author-icon {
+    font-size: 2.5vh;
+}
+
+#waterfallTitle {
+    font-size: 2vh;
+    font-weight: 700;
+}
+
+.waterfall-close {
+    width: 4vh;
+    height: 4vh;
+    border-radius: 50%;
+    background: var(--hover-bg);
+    border: none;
+    font-size: 2vh;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.waterfall-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 2vh 2vw;
+    column-count: 2; /* 默认双列瀑布流 */
+    column-gap: 2vw;
+}
+
+.waterfall-item {
+    break-inside: avoid;
+    margin-bottom: 2vw;
+    border-radius: 1.5vh;
+    overflow: hidden;
+    background-color: var(--card-bg);
+    box-shadow: 0 0.5vh 1.5vh rgba(0,0,0,0.1);
+    transition: transform 0.2s;
+    cursor: pointer;
+}
+
+.waterfall-item:active {
+    transform: scale(0.98);
+}
+
+.waterfall-item img {
+    width: 100%;
+    height: auto;
+    display: block;
+    border-radius: 1.5vh;
+}
+
+@media (min-width: 1024px) {
+    .waterfall-content {
+        column-count: 4; /* PC端显示4列 */
+    }
 }
