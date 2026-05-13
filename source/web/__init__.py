@@ -261,6 +261,20 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
         await recorder.update_tags(note_id, tags)
         return {"status": "success"}
 
+    @app.delete("/web/api/history/{note_id}")
+    async def delete_history(note_id: str):
+        await recorder.delete_history(note_id)
+        return {"status": "success"}
+
+    @app.post("/web/api/note/update")
+    async def update_note(payload: dict = Body(...)):
+        note_id = payload.get("note_id")
+        data = payload.get("data")
+        if note_id and data:
+            await recorder.update_note_data(note_id, data)
+            return {"status": "success"}
+        return JSONResponse({"error": "Invalid payload"}, status_code=400)
+
     @app.get("/web/api/proxy")
     async def proxy_media(url: str = Query(...)):
         try:

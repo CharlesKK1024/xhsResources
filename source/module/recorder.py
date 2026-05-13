@@ -283,6 +283,19 @@ class WebRecorder(IDRecorder):
         )
         await self.database.commit()
 
+    async def delete_history(self, note_id: str):
+        """删除指定作品的历史记录"""
+        await self.database.execute("DELETE FROM web_history WHERE note_id = ?;", (note_id,))
+        await self.database.commit()
+
+    async def update_note_data(self, note_id: str, data: dict):
+        """更新作品的 JSON 数据（如修改封面、删除部分媒体）"""
+        await self.database.execute(
+            "UPDATE web_history SET note_data = ? WHERE note_id = ?;",
+            (json.dumps(data, ensure_ascii=False), note_id),
+        )
+        await self.database.commit()
+
     async def get_history(self, search: str = None, sort: str = "time_desc"):
         query = "SELECT note_data, cache_time, is_starred, tags FROM web_history"
         params = []

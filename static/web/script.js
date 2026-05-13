@@ -187,13 +187,81 @@ class XHSWebUI {
         media.forEach((item, i) => {
             const div = document.createElement('div');
             div.className = 'preview-item';
+            if (data.cover === item.url || data.cover === this.getMediaUrl(item.url)) {
+                div.classList.add('is-cover');
+            }
+            
             const url = this.getMediaUrl(item.url);
-            div.innerHTML = `<img src="${url}" loading="lazy" referrerpolicy="no-referrer">`;
+            div.innerHTML = `
+                <img src="${url}" loading="lazy" referrerpolicy="no-referrer">
+                <div class="preview-actions">
+                    <button class="action-icon-btn set-cover-btn" title="设为封面">🖼️</button>
+                    <button class="action-icon-btn delete-media-btn" title="删除此项">🗑️</button>
+                </div>
+            `;
+            
+            // 设为封面逻辑
+            div.querySelector('.set-cover-btn').onclick = (e) => {
+                e.stopPropagation();
+                this.setAsCover(item.url);
+            };
+            
+            // 删除媒体逻辑
+            div.querySelector('.delete-media-btn').onclick = (e) => {
+                e.stopPropagation();
+                this.deleteMedia(item.url);
+            };
+
             div.onclick = () => window.open(url, '_blank');
             container.appendChild(div);
         });
 
         this.downloadAllBtn.style.display = data.images.length > 0 ? 'block' : 'none';
+    }
+
+    async setAsCover(url) {
+        if (!this.currentNote) return;
+        this.currentNote.cover = url;
+        await this.updateNoteData();
+        this.displayResult(this.currentNote);
+    }
+
+    async deleteMedia(url) {
+        if (!this.currentNote) return;
+        if (!confirm('确定要删除这张照片/视频吗？')) return;
+        
+        // 从 images 或 videos 中移除
+        if (this.currentNote.images) {
+            this.currentNote.images = this.currentNote.images.filter(img => img.url !== url);
+        }
+        if (this.currentNote.videos) {
+            this.currentNote.videos = this.currentNote.videos.filter(vid => vid.url !== url);
+        }
+        
+        // 如果删除的是当前封面，自动设第一张为新封面
+        if (this.currentNote.cover === url) {
+            const nextMedia = (this.currentNote.images && this.currentNote.images[0]) || 
+                              (this.currentNote.videos && this.currentNote.videos[0]);
+            this.currentNote.cover = nextMedia ? nextMedia.url : '';
+        }
+        
+        await this.updateNoteData();
+        this.displayResult(this.currentNote);
+    }
+
+    async updateNoteData() {
+        try {
+            await fetch('/web/api/note/update', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    note_id: this.currentNote.id,
+                    data: this.currentNote
+                })
+            });
+        } catch (e) {
+            console.error('更新作品数据失败', e);
+        }
     }
 
     async toggleStar() {
@@ -264,6 +332,7 @@ class XHSWebUI {
             div.innerHTML = `
                 <div class="item-cover">
                     <img src="${this.getMediaUrl(note.cover)}" loading="lazy">
+                    <button class="delete-item-btn" title="删除记录">✕</button>
                     ${item.is_starred ? '<div class="item-star-badge">❤️</div>' : ''}
                 </div>
                 <div class="item-info">
@@ -274,8 +343,28 @@ class XHSWebUI {
                     </div>
                 </div>
             `;
+            
+            // 删除逻辑
+            const deleteBtn = div.querySelector('.delete-item-btn');
+            deleteBtn.onclick = async (e) => {
+                e.stopPropagation();
+                    try {
+                        const resp = await fetch(`/web/api/history/${note.id}`, { method: 'DELETE' });
+                        if (resp.ok) {
+                            div.remove();
+                        }
+                    } catch (err) {
+                        alert('删除失败');
+                    }
+            };
+
             div.onclick = () => {
                 this.currentNote = note;
+                // 回显 URL 到输入框
+                if (note.url) {
+                    this.urlInput.value = note.url;
+                    this.refreshBtn.style.display = 'flex';
+                }
                 this.switchPage('extract-page');
                 this.displayResult(note);
                 this.updateStarBtn(item.is_starred);
