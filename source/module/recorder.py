@@ -3,11 +3,13 @@ from contextlib import suppress
 from typing import TYPE_CHECKING
 from shutil import move
 from aiosqlite import connect
+import json
+from datetime import datetime
 
 if TYPE_CHECKING:
     from ..module import Manager
 
-__all__ = ["IDRecorder", "DataRecorder", "MapRecorder"]
+__all__ = ["IDRecorder", "DataRecorder", "MapRecorder", "WebRecorder"]
 
 
 class IDRecorder:
@@ -64,8 +66,10 @@ class IDRecorder:
 
     async def __aexit__(self, exc_type, exc_value, traceback):
         with suppress(CancelledError):
-            await self.cursor.close()
-        await self.database.close()
+            if self.cursor:
+                await self.cursor.close()
+        if self.database:
+            await self.database.close()
 
     def compatible(
         self,
@@ -189,3 +193,143 @@ class MapRecorder(IDRecorder):
         if self.switch:
             await self.cursor.execute("SELECT ID, NAME FROM mapping_data")
             return [i[0] for i in await self.cursor.fetchmany()]
+
+
+class WebRecorder(IDRecorder):
+    def __init__(self, manager: "Manager"):
+        super().__init__(manager)
+        self.name = "WebData.db"
+        self.file = manager.root.joinpath(self.name)
+        self.switch = True
+
+    async def _connect_database(self):
+        self.database = await connect(self.file)
+        self.cursor = await self.database.cursor()
+        await self.database.execute(
+            """CREATE TABLE IF NOT EXISTS web_history (
+            note_id TEXT PRIMARY KEY,
+            note_data TEXT,
+            cache_time TEXT,
+            is_starred INTEGER DEFAULT 0,
+            tags TEXT,
+            author_id TEXT,
+            author_name TEXT,
+            source_url TEXT
+            );"""
+        )
+        await self.database.execute(
+            """CREATE TABLE IF NOT EXISTS url_cache (
+            url TEXT PRIMARY KEY,
+            local_path TEXT,
+            cache_date TEXT
+            );"""
+        )
+        await self.database.commit()
+        # 检查是否需要添加 source_url 列（针对旧数据库兼容）
+        try:
+            await self.database.execute("ALTER TABLE web_history ADD COLUMN source_url TEXT;")
+            await self.database.commit()
+        except:
+            pass
+
+    async def add_history(self, note_id: str, data: dict, author_id: str, author_name: str, source_url: str = None):
+        cache_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        await self.database.execute(
+            "INSERT OR REPLACE INTO web_history (note_id, note_data, cache_time, author_id, author_name, source_url) VALUES (?, ?, ?, ?, ?, ?);",
+            (note_id, json.dumps(data, ensure_ascii=False), cache_time, author_id, author_name, source_url),
+        )
+        await self.database.commit()
+
+    async def get_history_by_url(self, url: str):
+        await self.cursor.execute("SELECT note_data, is_starred, tags FROM web_history WHERE source_url = ?", (url,))
+        row = await self.cursor.fetchone()
+        if row:
+            return {
+                "data": json.loads(row[0]),
+                "is_starred": bool(row[1]),
+                "tags": row[2].split(",") if row[2] else [],
+            }
+        return None
+
+    async def add_url_cache(self, url: str, local_path: str):
+        cache_date = datetime.now().strftime("%Y%m%d")
+        await self.database.execute(
+            "INSERT OR REPLACE INTO url_cache (url, local_path, cache_date) VALUES (?, ?, ?);",
+            (url, local_path, cache_date),
+        )
+        await self.database.commit()
+
+    async def get_url_cache(self, url: str):
+        await self.cursor.execute("SELECT local_path FROM url_cache WHERE url = ?", (url,))
+        row = await self.cursor.fetchone()
+        return row[0] if row else None
+
+    async def delete_url_cache(self, url: str):
+        """删除指定 URL 的数据库记录"""
+        await self.database.execute("DELETE FROM url_cache WHERE url = ?;", (url,))
+        await self.database.commit()
+
+    async def update_star(self, note_id: str, is_starred: int):
+        await self.database.execute(
+            "UPDATE web_history SET is_starred = ? WHERE note_id = ?;",
+            (is_starred, note_id),
+        )
+        await self.database.commit()
+
+    async def update_tags(self, note_id: str, tags: str):
+        await self.database.execute(
+            "UPDATE web_history SET tags = ? WHERE note_id = ?;",
+            (tags, note_id),
+        )
+        await self.database.commit()
+
+    async def get_history(self, search: str = None, sort: str = "time_desc"):
+        query = "SELECT note_data, cache_time, is_starred, tags FROM web_history"
+        params = []
+        if search:
+            query += " WHERE note_data LIKE ? OR tags LIKE ? OR author_name LIKE ?"
+            p = f"%{search}%"
+            params.extend([p, p, p])
+        
+        if sort == "time_desc":
+            query += " ORDER BY cache_time DESC"
+        elif sort == "time_asc":
+            query += " ORDER BY cache_time ASC"
+        elif sort == "author":
+            query += " ORDER BY author_name ASC, cache_time DESC"
+            
+        await self.cursor.execute(query, tuple(params))
+        rows = await self.cursor.fetchall()
+        return [
+            {
+                "data": json.loads(row[0]),
+                "cache_time": row[1],
+                "is_starred": bool(row[2]),
+                "tags": row[3].split(",") if row[3] else [],
+            }
+            for row in rows
+        ]
+
+    async def get_collections(self, search: str = None, tag: str = None):
+        query = "SELECT note_data, cache_time, is_starred, tags FROM web_history WHERE is_starred = 1"
+        params = []
+        if search:
+            query += " AND (note_data LIKE ? OR tags LIKE ? OR author_name LIKE ?)"
+            p = f"%{search}%"
+            params.extend([p, p, p])
+        if tag and tag != "all":
+            query += " AND tags LIKE ?"
+            params.append(f"%{tag}%")
+            
+        query += " ORDER BY cache_time DESC"
+        await self.cursor.execute(query, tuple(params))
+        rows = await self.cursor.fetchall()
+        return [
+            {
+                "data": json.loads(row[0]),
+                "cache_time": row[1],
+                "is_starred": bool(row[2]),
+                "tags": row[3].split(",") if row[3] else [],
+            }
+            for row in rows
+        ]

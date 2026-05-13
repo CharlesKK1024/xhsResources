@@ -7,6 +7,7 @@ from .model import (
 from .recorder import DataRecorder
 from .recorder import IDRecorder
 from .recorder import MapRecorder
+from .recorder import WebRecorder
 from .mapping import Mapping
 from .settings import Settings
 from .static import (
