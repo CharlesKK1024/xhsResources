@@ -575,16 +575,181 @@ body {
     color: var(--primary-color);
 }
 
+/* 移动端顶部操作栏 - 默认隐藏 */
+.mobile-header-actions {
+    display: none;
+}
+
 /* 响应式适配 */
 @media (max-width: 1024px) {
     .sidebar { width: 80px; }
-    .logo-text, .nav-item span:not(.nav-icon) { display: none; }
+    .logo-text, .nav-item span:not(.nav-icon), .theme-text { display: none; }
     .nav-item { justify-content: center; }
+    .theme-toggle-btn, .settings-btn { justify-content: center; }
 }
 
 @media (max-width: 768px) {
-    .app-container { flex-direction: column; }
-    .sidebar { width: 100%; height: auto; flex-direction: row; padding: 12px; }
-    .nav-menu { flex-direction: row; }
-    .main-content { padding: 20px; }
+    .app-container {
+        flex-direction: column;
+        height: 100dvh;
+    }
+
+    /* 侧边栏转底部导航 - iOS 风格 */
+    .sidebar {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        height: calc(65px + env(safe-area-inset-bottom));
+        flex-direction: row;
+        padding: 0;
+        border-right: none;
+        border-top: 1px solid var(--border-color);
+        background-color: rgba(var(--sidebar-bg-rgb, 255, 255, 255), 0.85);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        z-index: 1000;
+        padding-bottom: env(safe-area-inset-bottom);
+        box-shadow: 0 -1px 0 rgba(0,0,0,0.05);
+    }
+
+    [data-theme="dark"] .sidebar {
+        background-color: rgba(30, 30, 30, 0.85);
+    }
+
+    .logo {
+        display: none;
+    }
+
+    .nav-menu {
+        flex-direction: row;
+        width: 100%;
+        padding: 0 10px;
+        gap: 0;
+        justify-content: space-around;
+        align-items: center;
+    }
+
+    .nav-item {
+        flex-direction: column;
+        padding: 8px 0;
+        font-size: 10px;
+        gap: 4px;
+        border-radius: 0;
+        flex: 1;
+        align-items: center;
+        text-align: center;
+        background: transparent !important;
+        transition: transform 0.1s;
+    }
+
+    .nav-item:active {
+        transform: scale(0.95);
+    }
+
+    .nav-item span:not(.nav-icon) {
+        display: block;
+        font-weight: 500;
+        letter-spacing: 0.5px;
+    }
+
+    .nav-icon {
+        font-size: 24px;
+    }
+
+    .nav-item.active {
+        color: var(--primary-color);
+    }
+
+    /* 主内容区 */
+    .main-content {
+        padding: 20px;
+        padding-bottom: calc(90px + env(safe-area-inset-bottom));
+        padding-top: calc(60px + env(safe-area-inset-top));
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    /* 移动端顶部操作栏 - 玻璃拟态 */
+    .mobile-header-actions {
+        display: flex;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: calc(55px + env(safe-area-inset-top));
+        padding-top: env(safe-area-inset-top);
+        padding-right: 20px;
+        justify-content: flex-end;
+        align-items: center;
+        gap: 12px;
+        background-color: rgba(var(--bg-color-rgb, 248, 249, 250), 0.8);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        z-index: 999;
+    }
+
+    [data-theme="dark"] .mobile-header-actions {
+        background-color: rgba(18, 18, 18, 0.8);
+    }
+
+    .mobile-action-btn {
+        width: 38px;
+        height: 38px;
+        border-radius: 12px;
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 18px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+        color: var(--text-main);
+    }
+
+    /* 作品卡片 - 移动端全宽 */
+    .note-card {
+        flex-direction: column;
+        padding: 0;
+        overflow: hidden;
+        border-radius: 24px;
+        margin-bottom: 24px;
+    }
+
+    .note-card .cover {
+        width: 100%;
+        height: auto;
+        aspect-ratio: 3/4;
+        border-radius: 0;
+    }
+
+    .note-card .info {
+        padding: 20px;
+    }
+
+    /* 列表适配 - Pro Max 两列展示非常美观 */
+    .data-list {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 15px;
+    }
+
+    .list-item {
+        border-radius: 20px;
+    }
+
+    .item-cover {
+        height: 180px;
+    }
+
+    .item-title {
+        font-size: 14px;
+        line-height: 1.4;
+    }
+}
+
+/* 针对较小屏幕手机 */
+@media (max-width: 380px) {
+    .data-list {
+        grid-template-columns: 1fr;
+    }
 }
