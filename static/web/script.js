@@ -18,6 +18,26 @@ class XHSWebUI {
         this.copyBtn = document.getElementById('copyBtn');
         this.starBtn = document.getElementById('starBtn');
         this.downloadAllBtn = document.getElementById('downloadAllBtn');
+        this.editModeBtn = document.getElementById('editModeBtn');
+        this.previewSection = document.querySelector('.preview-section');
+        this.scaleBtn = document.getElementById('scaleBtn');
+        this.cardScaler = document.getElementById('cardScaler');
+        this.scaleRange = document.getElementById('scaleRange');
+        this.scaleValue = document.getElementById('scaleValue');
+        
+        // 全景查看器元素
+        this.fullViewer = document.getElementById('fullViewer');
+        this.viewerImg = document.getElementById('viewerImg');
+        this.viewerCounter = document.getElementById('viewerCounter');
+        this.viewerClose = this.fullViewer.querySelector('.viewer-close');
+        this.viewerPrev = this.fullViewer.querySelector('.prev');
+        this.viewerNext = this.fullViewer.querySelector('.next');
+        
+        // 状态
+        this.isEditMode = false;
+        this.swipeInstances = [];
+        this.viewerList = []; // 当前查看器中的图片列表
+        this.viewerIndex = 0; // 当前图片索引
         
         // 导航元素
         this.navItems = document.querySelectorAll('.nav-item');
@@ -60,6 +80,54 @@ class XHSWebUI {
         this.copyBtn.addEventListener('click', () => this.copyLinks());
         this.starBtn.addEventListener('click', () => this.toggleStar());
         this.downloadAllBtn.addEventListener('click', () => this.downloadAllImages());
+        if (this.editModeBtn) {
+            this.editModeBtn.addEventListener('click', () => this.toggleEditMode());
+        }
+        if (this.scaleBtn) {
+            this.scaleBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.cardScaler.style.display = this.cardScaler.style.display === 'none' ? 'flex' : 'none';
+            });
+        }
+        if (this.scaleRange) {
+            this.scaleRange.addEventListener('input', (e) => this.handleScale(e.target.value));
+        }
+        // 点击外部关闭缩放面板
+        document.addEventListener('click', (e) => {
+            if (this.cardScaler && !this.cardScaler.contains(e.target) && e.target !== this.scaleBtn) {
+                this.cardScaler.style.display = 'none';
+            }
+        });
+
+        // 全景查看器事件
+        this.viewerClose.onclick = () => this.closeViewer();
+        this.viewerPrev.onclick = (e) => { e.stopPropagation(); this.prevImage(); };
+        this.viewerNext.onclick = (e) => { e.stopPropagation(); this.nextImage(); };
+        this.fullViewer.onclick = () => this.closeViewer();
+        
+        // 键盘支持
+        window.addEventListener('keydown', (e) => {
+            if (this.fullViewer.style.display === 'flex') {
+                if (e.key === 'ArrowLeft') this.prevImage();
+                if (e.key === 'ArrowRight') this.nextImage();
+                if (e.key === 'Escape') this.closeViewer();
+            }
+        });
+
+        // 触摸滑动支持
+        let touchStartX = 0;
+        this.fullViewer.addEventListener('touchstart', (e) => {
+            touchStartX = e.touches[0].clientX;
+        }, { passive: true });
+        this.fullViewer.addEventListener('touchend', (e) => {
+            const touchEndX = e.changedTouches[0].clientX;
+            const diff = touchEndX - touchStartX;
+            if (Math.abs(diff) > 50) {
+                if (diff > 0) this.prevImage();
+                else this.nextImage();
+            }
+        }, { passive: true });
+
         this.exportBtn = document.getElementById('exportBtn');
         if (this.exportBtn) {
             this.exportBtn.addEventListener('click', () => this.exportCollections());
@@ -84,8 +152,67 @@ class XHSWebUI {
             page.classList.toggle('active', page.id === targetId);
         });
 
+        // 缩放按钮显隐控制：仅在作品集或收藏页面显示
+        if (this.scaleBtn) {
+            this.scaleBtn.style.display = (targetId === 'history-page' || targetId === 'collection-page') ? 'flex' : 'none';
+        }
+
         if (targetId === 'history-page') this.loadHistory();
         if (targetId === 'collection-page') this.loadCollections();
+    }
+
+    handleScale(value) {
+        const scale = 1 + (value / 100);
+        document.documentElement.style.setProperty('--card-scale', scale);
+        this.scaleValue.textContent = `${Math.round(scale * 100)}%`;
+        
+        // 缩放时需要通知所有的滑动实例更新边界，否则滑动会出位
+        this.swipeInstances.forEach(instance => {
+            if (instance.setupStyles) instance.setupStyles();
+            if (instance.updatePositions) instance.updatePositions();
+        });
+    }
+
+    // 查看器核心方法
+    openViewer(images, startIndex = 0) {
+        if (!images || images.length === 0) return;
+        this.viewerList = images;
+        this.viewerIndex = startIndex;
+        this.fullViewer.style.display = 'flex';
+        document.body.style.overflow = 'hidden'; // 禁止背景滚动
+        this.updateViewerImage();
+    }
+
+    closeViewer() {
+        this.fullViewer.style.display = 'none';
+        document.body.style.overflow = '';
+    }
+
+    prevImage() {
+        if (this.viewerIndex > 0) {
+            this.viewerIndex--;
+            this.updateViewerImage();
+        }
+    }
+
+    nextImage() {
+        if (this.viewerIndex < this.viewerList.length - 1) {
+            this.viewerIndex++;
+            this.updateViewerImage();
+        }
+    }
+
+    updateViewerImage() {
+        const url = this.viewerList[this.viewerIndex];
+        this.viewerImg.style.opacity = '0';
+        this.viewerImg.src = this.getMediaUrl(url);
+        this.viewerImg.onload = () => {
+            this.viewerImg.style.opacity = '1';
+        };
+        this.viewerCounter.textContent = `${this.viewerIndex + 1} / ${this.viewerList.length}`;
+        
+        this.viewerPrev.style.visibility = this.viewerIndex === 0 ? 'hidden' : 'visible';
+        this.viewerNext.style.visibility = this.viewerIndex === this.viewerList.length - 1 ? 'hidden' : 'visible';
     }
 
     toggleTheme() {
@@ -182,6 +309,13 @@ class XHSWebUI {
         });
     }
 
+    toggleEditMode() {
+        this.isEditMode = !this.isEditMode;
+        this.editModeBtn.classList.toggle('active', this.isEditMode);
+        this.previewSection.classList.toggle('edit-active', this.isEditMode);
+        this.editModeBtn.textContent = this.isEditMode ? '✅ 完成编辑' : '✏️ 编辑模式';
+    }
+
     renderPreviewList(data) {
         const container = document.getElementById('previewList');
         container.innerHTML = '';
@@ -201,23 +335,30 @@ class XHSWebUI {
                 <img src="${url}" loading="lazy" referrerpolicy="no-referrer">
                 <div class="preview-actions">
                     <button class="action-icon-btn set-cover-btn" title="设为封面">🖼️</button>
-                    <button class="action-icon-btn delete-media-btn" title="删除此项">🗑️</button>
+                    <button class="action-icon-btn delete-media-btn" title="永久删除">🗑️</button>
                 </div>
             `;
             
             // 设为封面逻辑
-            div.querySelector('.set-cover-btn').onclick = (e) => {
+            const setCoverBtn = div.querySelector('.set-cover-btn');
+            setCoverBtn.onclick = (e) => {
                 e.stopPropagation();
                 this.setAsCover(item.url);
             };
             
             // 删除媒体逻辑
-            div.querySelector('.delete-media-btn').onclick = (e) => {
+            const deleteBtn = div.querySelector('.delete-media-btn');
+            deleteBtn.onclick = (e) => {
                 e.stopPropagation();
                 this.deleteMedia(item.url);
             };
 
-            div.onclick = () => window.open(url, '_blank');
+            div.onclick = () => {
+                if (!this.isEditMode) {
+                    const allUrls = media.map(m => m.url);
+                    this.openViewer(allUrls, i);
+                }
+            };
             container.appendChild(div);
         });
 
@@ -232,26 +373,42 @@ class XHSWebUI {
     }
 
     async deleteMedia(url) {
-        if (!this.currentNote) return;
-        if (!confirm('确定要删除这张照片/视频吗？')) return;
-        
-        // 从 images 或 videos 中移除
-        if (this.currentNote.images) {
-            this.currentNote.images = this.currentNote.images.filter(img => img.url !== url);
+        if (!this.currentNote) return; 
+        try {
+            // 1. 先尝试从后端物理删除文件
+            await fetch(`/web/api/cache?url=${encodeURIComponent(url)}`, { method: 'DELETE' });
+
+            // 2. 从内存数据中精准移除
+            if (this.currentNote.images) {
+                this.currentNote.images = this.currentNote.images.filter(img => img.url !== url);
+            }
+            if (this.currentNote.videos) {
+                this.currentNote.videos = this.currentNote.videos.filter(vid => vid.url !== url);
+            }
+            
+            // 3. 处理封面变动
+            let coverChanged = false;
+            if (this.currentNote.cover === url) {
+                const nextMedia = (this.currentNote.images && this.currentNote.images[0]) || 
+                                (this.currentNote.videos && this.currentNote.videos[0]);
+                this.currentNote.cover = nextMedia ? nextMedia.url : '';
+                coverChanged = true;
+            }
+            
+            // 4. 同步到数据库记录
+            await this.updateNoteData();
+            
+            // 5. 局部刷新 UI，消除闪烁
+            if (coverChanged) {
+                const coverImg = document.getElementById('coverImg');
+                if (coverImg) coverImg.src = this.getMediaUrl(this.currentNote.cover);
+            }
+            this.renderPreviewList(this.currentNote);
+            
+        } catch (err) {
+            console.error('删除媒体失败:', err);
+            alert('删除失败，请稍后重试');
         }
-        if (this.currentNote.videos) {
-            this.currentNote.videos = this.currentNote.videos.filter(vid => vid.url !== url);
-        }
-        
-        // 如果删除的是当前封面，自动设第一张为新封面
-        if (this.currentNote.cover === url) {
-            const nextMedia = (this.currentNote.images && this.currentNote.images[0]) || 
-                              (this.currentNote.videos && this.currentNote.videos[0]);
-            this.currentNote.cover = nextMedia ? nextMedia.url : '';
-        }
-        
-        await this.updateNoteData();
-        this.displayResult(this.currentNote);
     }
 
     async updateNoteData() {
@@ -325,6 +482,7 @@ class XHSWebUI {
 
     renderDataList(container, items) {
         container.innerHTML = '';
+        this.swipeInstances = []; // 重新渲染时清空滑动实例记录
         if (!items.length) {
             container.innerHTML = '<div class="empty-tip">暂无数据</div>';
             return;
@@ -352,10 +510,26 @@ class XHSWebUI {
                 const header = document.createElement('div');
                 header.className = 'author-info-header';
                 header.innerHTML = `
-                    <div class="author-name-tag">👤 ${author}</div>
+                    <div class="author-name-tag">
+                        👤 ${author}
+                        <button class="panorama-btn" title="查看该作者全景图集">🖼️ 全景视图</button>
+                    </div>
                     <div class="author-work-count">${authorItems.length} 个作品</div>
                 `;
                 row.appendChild(header);
+
+                // 全景按钮逻辑
+                header.querySelector('.panorama-btn').onclick = (e) => {
+                    e.stopPropagation();
+                    // 收集该作者所有作品的所有图片
+                    const allImages = [];
+                    authorItems.forEach(item => {
+                        if (item.data && item.data.images) {
+                            allImages.push(...item.data.images.map(img => img.url));
+                        }
+                    });
+                    this.openViewer(allImages);
+                };
 
                 // 滑动视口
                 const viewport = document.createElement('div');
@@ -420,7 +594,8 @@ class XHSWebUI {
 
                 // 初始化堆叠滑动
                 if (window.StackSwipe) {
-                    new StackSwipe(viewport);
+                    const swipe = new StackSwipe(viewport);
+                    this.swipeInstances.push(swipe);
                 }
             } catch (err) {
                 console.error(`渲染作者 ${author} 的作品失败:`, err);

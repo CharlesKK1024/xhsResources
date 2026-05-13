@@ -266,6 +266,22 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
         await recorder.delete_history(note_id)
         return {"status": "success"}
 
+    @app.delete("/web/api/cache")
+    async def delete_cache(url: str = Query(...)):
+        """物理删除缓存文件并清理数据库记录"""
+        try:
+            cached_path = await recorder.get_url_cache(url)
+            if cached_path:
+                full_path = CACHE_DIR / cached_path
+                if full_path.exists():
+                    os.remove(full_path)
+                # 从数据库 url_cache 表中删除
+                await recorder.delete_url_cache(url)
+            return {"status": "success"}
+        except Exception as e:
+            logging(None, f"物理删除失败 {url}: {e}", ERROR)
+            return JSONResponse({"error": str(e)}, status_code=500)
+
     @app.post("/web/api/note/update")
     async def update_note(payload: dict = Body(...)):
         note_id = payload.get("note_id")
