@@ -9,6 +9,7 @@ class XHSWebUI {
         this.urlInput = document.getElementById('urlInput');
         this.cookieInput = document.getElementById('cookieInput');
         this.fetchBtn = document.getElementById('fetchBtn');
+        this.clearBtn = document.getElementById('clearBtn');
         this.refreshBtn = document.getElementById('refreshBtn');
         this.loading = document.getElementById('loading');
         this.result = document.getElementById('result');
@@ -46,6 +47,10 @@ class XHSWebUI {
         });
 
         // 提取功能
+        this.clearBtn.addEventListener('click', () => {
+            this.urlInput.value = '';
+            this.urlInput.focus();
+        });
         this.fetchBtn.addEventListener('click', () => this.fetchNote(false));
         this.refreshBtn.addEventListener('click', () => this.fetchNote(true));
         this.urlInput.addEventListener('keypress', (e) => {
@@ -325,51 +330,101 @@ class XHSWebUI {
             return;
         }
 
+        // 按作者分组
+        const groups = {};
         items.forEach(item => {
-            const note = item.data;
-            const div = document.createElement('div');
-            div.className = 'list-item';
-            div.innerHTML = `
-                <div class="item-cover">
-                    <img src="${this.getMediaUrl(note.cover)}" loading="lazy">
-                    <button class="delete-item-btn" title="删除记录">✕</button>
-                    ${item.is_starred ? '<div class="item-star-badge">❤️</div>' : ''}
-                </div>
-                <div class="item-info">
-                    <div class="item-title">${note.title || '无标题'}</div>
-                    <div class="item-meta">
-                        <span>👤 ${note.author}</span>
-                        <span>📅 ${note.time || '-'}</span>
-                    </div>
-                </div>
-            `;
-            
-            // 删除逻辑
-            const deleteBtn = div.querySelector('.delete-item-btn');
-            deleteBtn.onclick = async (e) => {
-                e.stopPropagation();
-                    try {
-                        const resp = await fetch(`/web/api/history/${note.id}`, { method: 'DELETE' });
-                        if (resp.ok) {
-                            div.remove();
-                        }
-                    } catch (err) {
-                        alert('删除失败');
-                    }
-            };
+            const author = (item.data && item.data.author) || '未知作者';
+            if (!groups[author]) groups[author] = [];
+            groups[author].push(item);
+        });
 
-            div.onclick = () => {
-                this.currentNote = note;
-                // 回显 URL 到输入框
-                if (note.url) {
-                    this.urlInput.value = note.url;
-                    this.refreshBtn.style.display = 'flex';
+        const sortedAuthors = Object.keys(groups).sort();
+
+        sortedAuthors.forEach(author => {
+            try {
+                const authorItems = groups[author];
+                if (!authorItems || authorItems.length === 0) return;
+
+                const row = document.createElement('div');
+                row.className = 'author-row';
+                
+                // 作者信息头部
+                const header = document.createElement('div');
+                header.className = 'author-info-header';
+                header.innerHTML = `
+                    <div class="author-name-tag">👤 ${author}</div>
+                    <div class="author-work-count">${authorItems.length} 个作品</div>
+                `;
+                row.appendChild(header);
+
+                // 滑动视口
+                const viewport = document.createElement('div');
+                viewport.className = 'cards-viewport';
+                
+                const wrapper = document.createElement('div');
+                wrapper.className = 'cards-wrapper';
+
+                authorItems.forEach(item => {
+                    const note = item.data;
+                    if (!note) return; // 跳过空数据
+
+                    const card = document.createElement('div');
+                    card.className = 'list-item';
+                    card.innerHTML = `
+                        <div class="item-cover">
+                            <img src="${this.getMediaUrl(note.cover)}" loading="lazy">
+                            <button class="delete-item-btn" title="删除记录">✕</button>
+                            ${item.is_starred ? '<div class="item-star-badge">❤️</div>' : ''}
+                        </div>
+                        <div class="item-info">
+                            <div class="item-title">${note.title || '无标题'}</div>
+                            <div class="item-meta">
+                                <span>📅 ${note.time ? note.time.split(' ')[0] : '-'}</span>
+                                <span>❤️ ${this.formatNum(note.likeCount)}</span>
+                            </div>
+                        </div>
+                    `;
+                    
+                    // 删除逻辑
+                    const deleteBtn = card.querySelector('.delete-item-btn');
+                    deleteBtn.onclick = async (e) => {
+                        e.stopPropagation();
+                        if (!confirm('确定要删除这条记录吗？')) return;
+                        try {
+                            const resp = await fetch(`/web/api/history/${note.id}`, { method: 'DELETE' });
+                            if (resp.ok) {
+                                card.remove();
+                                if (wrapper.children.length === 0) row.remove();
+                            }
+                        } catch (err) {
+                            alert('删除失败');
+                        }
+                    };
+
+                    card.onclick = () => {
+                        this.currentNote = note;
+                        if (note.url) {
+                            this.urlInput.value = note.url;
+                            this.refreshBtn.style.display = 'flex';
+                        }
+                        this.switchPage('extract-page');
+                        this.displayResult(note);
+                        this.updateStarBtn(item.is_starred);
+                    };
+                    wrapper.appendChild(card);
+                });
+
+                viewport.appendChild(wrapper);
+                row.appendChild(viewport);
+                container.appendChild(row);
+
+                // 初始化堆叠滑动
+                if (window.StackSwipe) {
+                    new StackSwipe(viewport);
                 }
-                this.switchPage('extract-page');
-                this.displayResult(note);
-                this.updateStarBtn(item.is_starred);
-            };
-            container.appendChild(div);
+            } catch (err) {
+                console.error(`渲染作者 ${author} 的作品失败:`, err);
+            }
         });
     }
 

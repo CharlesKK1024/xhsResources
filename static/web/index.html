@@ -20,26 +20,18 @@
                     <span class="nav-icon">🔍</span> 提取作品
                 </button>
                 <button class="nav-item" data-target="history-page">
-                    <span class="nav-icon">🕒</span> 历史记录
+                    <span class="nav-icon">🕒</span> 作品集
                 </button>
                 <button class="nav-item" data-target="collection-page">
                     <span class="nav-icon">⭐</span> 个人收藏
                 </button>
             </nav>
-            <div class="sidebar-footer">
-                <button id="themeToggle" class="theme-toggle-btn" title="切换深色/浅色模式">
-                    <span class="nav-icon">🌙</span> <span class="theme-text">深色模式</span>
-                </button>
-                <button id="settingsBtn" class="settings-btn">
-                    <span class="nav-icon">⚙️</span> 设置
-                </button>
-            </div>
         </aside>
 
-        <!-- 移动端顶部操作栏 -->
-        <div class="mobile-header-actions">
-            <button id="mobileThemeToggle" class="mobile-action-btn" title="切换主题">🌙</button>
-            <button id="mobileSettingsBtn" class="mobile-action-btn" title="设置">⚙️</button>
+        <!-- 顶部操作栏 (深色模式/设置) -->
+        <div class="top-header-actions">
+            <button id="themeToggle" class="action-btn" title="切换深色/浅色模式">🌙</button>
+            <button id="settingsBtn" class="action-btn" title="设置">⚙️</button>
         </div>
 
         <main class="main-content">
@@ -55,9 +47,14 @@
                         <input type="text" id="urlInput" placeholder="粘贴小红书作品链接..." class="url-input">
                         <input type="text" id="cookieInput" placeholder="Cookie（可选，登录后获取）" class="cookie-input">
                     </div>
-                    <button id="fetchBtn" class="fetch-btn">
-                        <span class="btn-icon">🚀</span> 获取信息
-                    </button>
+                    <div class="button-group">
+                        <button id="clearBtn" class="clear-btn">
+                            <span class="btn-icon">🧹</span> 一键清空
+                        </button>
+                        <button id="fetchBtn" class="fetch-btn">
+                            <span class="btn-icon">🚀</span> 获取信息
+                        </button>
+                    </div>
                     <button id="refreshBtn" class="refresh-btn" title="强制刷新（重新向小红书请求数据）" style="display:none;">
                         <span class="btn-icon">🔄</span>
                     </button>
@@ -107,10 +104,10 @@
                 </div>
             </section>
 
-            <!-- 历史记录页面 -->
+            <!-- 作品集页面 -->
             <section id="history-page" class="page">
                 <header class="page-header">
-                    <h2>历史记录</h2>
+                    <h2>作品集</h2>
                     <div class="header-actions">
                         <div class="search-box">
                             <input type="text" id="historySearch" placeholder="搜索标题、作者、标签...">
@@ -196,6 +193,7 @@
         </footer>
     </div>
 
+    <script src="/web/static/utils/swipe.js"></script>
     <script src="/web/static/script.js"></script>
 </body>
 </html>

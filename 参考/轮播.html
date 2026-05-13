@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>作者作品整行堆叠滑动</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: #121212;
+            color: white;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            padding: 2rem;
+        }
+
+        /* 作品集容器：垂直排列，每个作者一行 */
+        .history-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 32px;
+        }
+
+        .section-title {
+            font-size: 36px;
+            font-weight: 700;
+            margin-bottom: 24px;
+            max-width: 1400px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        /* 核心：整行堆叠容器 */
+        .author-row {
+            width: 100%;
+            height: 340px; /* 固定行高，和卡片高度一致 */
+            overflow: hidden;
+            position: relative;
+            cursor: grab;
+            border-radius: 20px;
+            background-color: #1a1a1a;
+            padding: 16px;
+        }
+
+        .author-row:active {
+            cursor: grabbing;
+        }
+
+        /* 卡片包装器：横向排列所有卡片 */
+        .cards-wrapper {
+            display: flex;
+            height: 100%;
+            gap: 20px; /* 卡片之间的间距 */
+            transition: transform 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            will-change: transform;
+        }
+
+        /* 单个卡片样式 */
+        .work-card {
+            flex-shrink: 0;
+            width: 260px;
+            height: 100%;
+            border-radius: 16px;
+            background-color: #252525;
+            overflow: hidden;
+            transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+        }
+
+        /* 卡片内容 */
+        .card-image {
+            width: 100%;
+            height: 240px;
+            object-fit: cover;
+            background-color: #333;
+        }
+
+        .card-info {
+            padding: 14px;
+        }
+
+        .card-title {
+            font-size: 15px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .card-author {
+            font-size: 13px;
+            color: #999;
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .card-time {
+            font-size: 12px;
+            color: #777;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        /* 作者标签（可选，显示在左上角） */
+        .author-tag {
+            position: absolute;
+            top: 8px;
+            left: 24px;
+            background-color: rgba(0,0,0,0.6);
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 13px;
+            z-index: 10;
+            backdrop-filter: blur(10px);
+        }
+
+        /* 隐藏滚动条 */
+        .author-row::-webkit-scrollbar {
+            display: none;
+        }
+
+        .author-row {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+</head>
+<body>
+    <h1 class="section-title">作品集</h1>
+    
+    <div class="history-container" id="historyContainer">
+        <!-- 作者行会通过JS动态生成 -->
+    </div>
+
+    <script>
+        // 你的作品集数据（替换成你自己的）
+        const works = [
+            {
+                id: 1,
+                title: "黑色系氛围感写真",
+                author: "HUHU",
+                time: "2025-12-18 11:52:07",
+                image: "https://picsum.photos/seed/huhu1/600/480"
+            },
+            {
+                id: 2,
+                title: "粉色娇嫩 你如今几岁了",
+                author: "HUHU",
+                time: "2026-04-20 18:30:09",
+                image: "https://picsum.photos/seed/huhu2/600/480"
+            },
+            {
+                id: 3,
+                title: "赛博朋克风格大片",
+                author: "HUHU",
+                time: "2026-05-01 20:15:33",
+                image: "https://picsum.photos/seed/huhu3/600/480"
+            },
+            {
+                id: 4,
+                title: "夏日海边度假风",
+                author: "LUNA",
+                time: "2026-05-05 14:22:11",
+                image: "https://picsum.photos/seed/luna1/600/480"
+            },
+            {
+                id: 5,
+                title: "复古港风穿搭",
+                author: "LUNA",
+                time: "2026-05-08 09:45:27",
+                image: "https://picsum.photos/seed/luna2/600/480"
+            },
+            {
+                id: 6,
+                title: "城市夜景摄影",
+                author: "JACK",
+                time: "2026-05-10 22:10:45",
+                image: "https://picsum.photos/seed/jack1/600/480"
+            },
+            {
+                id: 7,
+                title: "日系清新人像",
+                author: "JACK",
+                time: "2026-05-11 10:30:15",
+                image: "https://picsum.photos/seed/jack2/600/480"
+            },
+            {
+                id: 8,
+                title: "街头随拍",
+                author: "JACK",
+                time: "2026-05-12 16:45:30",
+                image: "https://picsum.photos/seed/jack3/600/480"
+            }
+        ];
+
+        // 按作者分组
+        function groupByAuthor(works) {
+            const groups = {};
+            works.forEach(work => {
+                if (!groups[work.author]) {
+                    groups[work.author] = [];
+                }
+                groups[work.author].push(work);
+            });
+            return Object.entries(groups);
+        }
+
+        // 创建单个作品卡片
+        function createWorkCard(work) {
+            return `
+                <div class="work-card" data-id="${work.id}">
+                    <img src="${work.image}" alt="${work.title}" class="card-image" loading="lazy">
+                    <div class="card-info">
+                        <div class="card-title">${work.title}</div>
+                        <div class="card-author">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                                <circle cx="12" cy="7" r="4"></circle>
+                            </svg>
+                            ${work.author}
+                        </div>
+                        <div class="card-time">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                                <line x1="16" y1="2" x2="16" y2="6"></line>
+                                <line x1="8" y1="2" x2="8" y2="6"></line>
+                                <line x1="3" y1="10" x2="21" y2="10"></line>
+                            </svg>
+                            ${work.time}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // 创建单个作者的整行容器
+        function createAuthorRow(author, works) {
+            const row = document.createElement('div');
+            row.className = 'author-row';
+            
+            // 添加作者标签
+            const authorTag = document.createElement('div');
+            authorTag.className = 'author-tag';
+            authorTag.textContent = `${author} (${works.length}个作品)`;
+            row.appendChild(authorTag);
+            
+            // 创建卡片包装器
+            const wrapper = document.createElement('div');
+            wrapper.className = 'cards-wrapper';
+            
+            // 生成所有卡片
+            works.forEach(work => {
+                wrapper.innerHTML += createWorkCard(work);
+            });
+            
+            row.appendChild(wrapper);
+            
+            // 初始化滑动逻辑
+            initRowSwipe(row, works.length);
+            
+            return row;
+        }
+
+        // 初始化单行滑动逻辑（iPhone后台式）
+        function initRowSwipe(row, cardCount) {
+            const wrapper = row.querySelector('.cards-wrapper');
+            let isDragging = false;
+            let startX = 0;
+            let currentTranslate = 0;
+            let prevTranslate = 0;
+            let animationID = null;
+
+            // 计算最大可滑动距离
+            const cardWidth = 260 + 20; // 卡片宽度+间距
+            const maxTranslate = 0;
+            const minTranslate = -(cardCount * cardWidth - row.offsetWidth + 32); // 32是左右内边距
+
+            // 滑动动画
+            function animate() {
+                wrapper.style.transform = `translateX(${currentTranslate}px)`;
+                if (isDragging) {
+                    animationID = requestAnimationFrame(animate);
+                }
+            }
+
+            // 鼠标事件
+            row.addEventListener('mousedown', (e) => {
+                isDragging = true;
+                startX = e.pageX;
+                animationID = requestAnimationFrame(animate);
+                row.style.cursor = 'grabbing';
+            });
+
+            document.addEventListener('mouseup', () => {
+                if (!isDragging) return;
+                isDragging = false;
+                cancelAnimationFrame(animationID);
+                row.style.cursor = 'grab';
+                
+                // 自动吸附到最近的卡片
+                const movedBy = currentTranslate - prevTranslate;
+                if (movedBy < -50 && currentTranslate > minTranslate) {
+                    // 向左滑
+                    currentTranslate = prevTranslate - cardWidth;
+                } else if (movedBy > 50 && currentTranslate < maxTranslate) {
+                    // 向右滑
+                    currentTranslate = prevTranslate + cardWidth;
+                } else {
+                    // 回弹
+                    currentTranslate = prevTranslate;
+                }
+
+                // 限制边界
+                currentTranslate = Math.max(minTranslate, Math.min(maxTranslate, currentTranslate));
+                prevTranslate = currentTranslate;
+                
+                // 应用动画
+                wrapper.style.transition = 'transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+                wrapper.style.transform = `translateX(${currentTranslate}px)`;
+                
+                // 重置过渡
+                setTimeout(() => {
+                    wrapper.style.transition = 'none';
+                }, 300);
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (!isDragging) return;
+                const x = e.pageX;
+                const walk = x - startX;
+                currentTranslate = prevTranslate + walk;
+                
+                // 边界阻尼效果
+                if (currentTranslate > maxTranslate) {
+                    currentTranslate = maxTranslate + (walk * 0.3);
+                } else if (currentTranslate < minTranslate) {
+                    currentTranslate = minTranslate + (walk * 0.3);
+                }
+            });
+
+            // 触摸设备支持
+            row.addEventListener('touchstart', (e) => {
+                isDragging = true;
+                startX = e.touches[0].pageX;
+                animationID = requestAnimationFrame(animate);
+            });
+
+            document.addEventListener('touchend', () => {
+                if (!isDragging) return;
+                isDragging = false;
+                cancelAnimationFrame(animationID);
+                
+                // 自动吸附逻辑和鼠标事件一致
+                const movedBy = currentTranslate - prevTranslate;
+                if (movedBy < -50 && currentTranslate > minTranslate) {
+                    currentTranslate = prevTranslate - cardWidth;
+                } else if (movedBy > 50 && currentTranslate < maxTranslate) {
+                    currentTranslate = prevTranslate + cardWidth;
+                } else {
+                    currentTranslate = prevTranslate;
+                }
+
+                currentTranslate = Math.max(minTranslate, Math.min(maxTranslate, currentTranslate));
+                prevTranslate = currentTranslate;
+                
+                wrapper.style.transition = 'transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+                wrapper.style.transform = `translateX(${currentTranslate}px)`;
+                
+                setTimeout(() => {
+                    wrapper.style.transition = 'none';
+                }, 300);
+            });
+
+            document.addEventListener('touchmove', (e) => {
+                if (!isDragging) return;
+                const x = e.touches[0].pageX;
+                const walk = x - startX;
+                currentTranslate = prevTranslate + walk;
+                
+                if (currentTranslate > maxTranslate) {
+                    currentTranslate = maxTranslate + (walk * 0.3);
+                } else if (currentTranslate < minTranslate) {
+                    currentTranslate = minTranslate + (walk * 0.3);
+                }
+            });
+        }
+
+        // 渲染所有内容
+        function renderHistory() {
+            const container = document.getElementById('historyContainer');
+            const groupedWorks = groupByAuthor(works);
+
+            groupedWorks.forEach(([author, works]) => {
+                const authorRow = createAuthorRow(author, works);
+                container.appendChild(authorRow);
+            });
+        }
+
+        // 页面加载完成后渲染
+        document.addEventListener('DOMContentLoaded', renderHistory);
+    </script>
+</body>
+</html>
