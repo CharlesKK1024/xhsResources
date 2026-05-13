@@ -355,25 +355,55 @@ body {
     margin-top: 20px;
 }
 
-.preview-section h3 {
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.section-header h3 {
     font-size: 15px;
     color: #333;
-    margin-bottom: 12px;
+    margin-bottom: 0;
+}
+
+.download-all-btn {
+    padding: 6px 14px;
+    background: linear-gradient(135deg, #ff6b9d, #c44569);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.download-all-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(255, 107, 157, 0.3);
 }
 
 .preview-list {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-    gap: 10px;
+    gap: 12px;
 }
 
 .preview-item {
     position: relative;
-    border-radius: 10px;
+    border-radius: 12px;
     overflow: hidden;
     border: 1px solid #e9ecef;
     aspect-ratio: 1;
     background: #f8f9fa;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.preview-item:hover {
+    transform: scale(1.02);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
 .preview-item img {
@@ -385,14 +415,42 @@ body {
 
 .preview-item .preview-index {
     position: absolute;
-    top: 6px;
-    left: 6px;
+    top: 8px;
+    left: 8px;
     background: rgba(0, 0, 0, 0.6);
     color: white;
     font-size: 11px;
     padding: 2px 8px;
     border-radius: 4px;
+    z-index: 1;
 }
+
+.preview-item .download-single-btn {
+    position: absolute;
+    bottom: 8px;
+    right: 8px;
+    width: 32px;
+    height: 32px;
+    background: rgba(255, 255, 255, 0.9);
+    color: #ff6b9d;
+    border: none;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 14px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+    transition: background 0.2s, transform 0.2s;
+    z-index: 2;
+}
+
+.preview-item .download-single-btn:hover {
+    background: white;
+    transform: scale(1.1);
+    color: #c44569;
+}
+
 
 .error {
     display: flex;

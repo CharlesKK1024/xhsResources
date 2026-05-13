@@ -13,6 +13,7 @@ class XHSWebUI {
         this.error = document.getElementById('error');
         this.errorMsg = document.getElementById('errorMsg');
         this.copyBtn = document.getElementById('copyBtn');
+        this.downloadAllBtn = document.getElementById('downloadAllBtn');
         this.settingsPanel = document.getElementById('settingsPanel');
         this.closeSettings = document.getElementById('closeSettings');
         this.saveSettings = document.getElementById('saveSettings');
@@ -27,6 +28,7 @@ class XHSWebUI {
             if (e.key === 'Enter') this.fetchNote();
         });
         this.copyBtn.addEventListener('click', () => this.copyLinks());
+        this.downloadAllBtn.addEventListener('click', () => this.downloadAllImages());
         this.settingsBtn.addEventListener('click', () => this.showSettings());
         this.closeSettings.addEventListener('click', () => this.hideSettings());
         this.saveSettings.addEventListener('click', () => this.saveSettingsHandler());
@@ -82,6 +84,12 @@ class XHSWebUI {
         document.getElementById('likeCount').textContent = this.formatNum(data.likeCount);
         document.getElementById('collectCount').textContent = this.formatNum(data.collectCount);
 
+        if (data.images && data.images.length > 0) {
+            this.downloadAllBtn.style.display = 'block';
+        } else {
+            this.downloadAllBtn.style.display = 'none';
+        }
+
         const cover = document.getElementById('coverImg');
         if (data.cover) {
             cover.referrerPolicy = "no-referrer";
@@ -108,59 +116,58 @@ class XHSWebUI {
     }
 
     renderDownloadList(data) {
-        const container = document.getElementById('downloadList');
-        container.innerHTML = '';
         const previewContainer = document.getElementById('previewList');
         previewContainer.innerHTML = '';
 
-        const items = [];
-
         if (data.images && data.images.length) {
             data.images.forEach((img, i) => {
-                items.push({
-                    icon: '🖼️',
-                    name: `图片 ${i + 1}`,
-                    info: img.width && img.height ? `${img.width} × ${img.height}` : '',
-                    url: img.url
-                });
+                const url = this.proxyUrl(img.url);
                 const previewEl = document.createElement('div');
                 previewEl.className = 'preview-item';
+                previewEl.title = '双击下载图片';
                 previewEl.innerHTML = `
-                    <img src="${this.proxyUrl(img.url)}" alt="图片 ${i + 1}" loading="lazy" referrerpolicy="no-referrer">
+                    <img src="${url}" alt="图片 ${i + 1}" loading="lazy" referrerpolicy="no-referrer">
                     <span class="preview-index">${i + 1}</span>
+                    <button class="download-single-btn" title="下载此图片">📥</button>
                 `;
+                
+                // 单击按钮下载
+                const dlBtn = previewEl.querySelector('.download-single-btn');
+                dlBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.downloadFile(url, `xhs_image_${i + 1}.png`);
+                });
+
+                // 双击图片下载
+                previewEl.addEventListener('dblclick', () => {
+                    this.downloadFile(url, `xhs_image_${i + 1}.png`);
+                });
+
                 previewContainer.appendChild(previewEl);
             });
         }
+    }
 
-        if (data.videos && data.videos.length) {
-            data.videos.forEach((v, i) => {
-                items.push({
-                    icon: '🎬',
-                    name: `视频 ${i + 1}`,
-                    info: '',
-                    url: v.url
-                });
-            });
-        }
+    downloadFile(url, filename) {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.target = '_blank'; // 确保在某些情况下能正常工作
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    }
 
-        if (!items.length) {
-            container.innerHTML = '<p class="no-links">暂无下载链接</p>';
-            return;
-        }
+    downloadAllImages() {
+        const data = JSON.parse(localStorage.getItem('xhs_last_note') || '{}');
+        if (!data.images || !data.images.length) return;
 
-        items.forEach(item => {
-            const el = document.createElement('div');
-            el.className = 'download-item';
-            el.innerHTML = `
-                <div class="item-icon">${item.icon}</div>
-                <div class="item-info">
-                    <div class="item-name">${item.name}</div>
-                    ${item.info ? `<div class="item-size">${item.info}</div>` : ''}
-                </div>
-                <a class="item-link" href="${this.proxyUrl(item.url)}" target="_blank" rel="noopener">下载</a>
-            `;
-            container.appendChild(el);
+        data.images.forEach((img, i) => {
+            // 使用 setTimeout 错开下载请求，避免浏览器拦截
+            setTimeout(() => {
+                const url = this.proxyUrl(img.url);
+                this.downloadFile(url, `xhs_image_${i + 1}.png`);
+            }, i * 300);
         });
     }
 
