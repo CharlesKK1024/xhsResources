@@ -23,6 +23,7 @@ class StackSwipe {
             lastTime: 0,
             velocity: 0,
             moved: false,
+            isVerticalScroll: false, // 标记是否为纵向滚动
             currentTranslate: 0,
             prevTranslate: 0,
             spreadProgress: 0
@@ -78,9 +79,13 @@ class StackSwipe {
     }
 
     onStart(e) {
+        // 如果全局页面正在滚动，则禁止开始滑动交互
+        if (window.isPageScrolling) return;
+
         this.state.isDragging = true;
+        this.state.isVerticalScroll = false;
         this.state.startX = this.getClientX(e);
-        this.state.startY = this.getClientY ? this.getClientY(e) : 0; // 记录初始 Y
+        this.state.startY = this.getClientY(e);
         this.state.lastX = this.state.startX;
         this.state.lastTime = Date.now();
         this.state.velocity = 0;
@@ -95,16 +100,29 @@ class StackSwipe {
     }
 
     onMove(e) {
-        if (!this.state.isDragging) return;
+        if (!this.state.isDragging || this.state.isVerticalScroll || window.isPageScrolling) {
+            if (window.isPageScrolling && this.state.isDragging) {
+                this.onEnd(); // 强制结束
+            }
+            return;
+        }
 
         const x = this.getClientX(e);
-        const y = this.getClientY ? this.getClientY(e) : 0;
+        const y = this.getClientY(e);
         const dx = x - this.state.lastX;
         const totalDx = Math.abs(x - this.state.startX);
+        const totalDy = Math.abs(y - this.state.startY);
         
-        // 如果移动距离超过阈值，标记为已移动
-        if (totalDx > 10) {
+        // 方向判定：如果在产生明显位移前，垂直位移大于水平位移，则判定为页面纵向滚动
+        if (!this.state.moved && totalDy > 5 && totalDy > totalDx) {
+            this.state.isVerticalScroll = true;
+            return;
+        }
+
+        // 如果确定是横向滑动，阻止默认滚动行为
+        if (totalDx > 5) {
             this.state.moved = true;
+            if (e.cancelable) e.preventDefault();
         }
 
         const now = Date.now();

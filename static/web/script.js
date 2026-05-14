@@ -5,6 +5,17 @@ class XHSWebUI {
     }
 
     init() {
+        // 全局滚动状态管理
+        window.isPageScrolling = false;
+        let scrollTimer = null;
+        document.querySelector('.main-content').addEventListener('scroll', () => {
+            window.isPageScrolling = true;
+            if (scrollTimer) clearTimeout(scrollTimer);
+            scrollTimer = setTimeout(() => {
+                window.isPageScrolling = false;
+            }, 150); // 滚动停止 150ms 后释放
+        }, { passive: true });
+
         // 提取页面元素
         this.urlInput = document.getElementById('urlInput');
         this.fetchBtn = document.getElementById('fetchBtn');
@@ -197,8 +208,18 @@ class XHSWebUI {
         
         this.collectionSearch.addEventListener('input', () => this.debounce(() => this.loadCollections(), 500)());
 
-        // 剪贴板监听：当页面获得焦点时检查
+        // 剪贴板监听：当页面获得焦点或从后台切换回前台时检查
         window.addEventListener('focus', () => this.checkClipboard());
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') this.checkClipboard();
+        });
+
+        // iOS 补偿机制：点击页面任何地方时，如果上次检测失败，尝试再次检测
+        document.addEventListener('click', () => {
+            if (this.isIOS() && !this.lastClipboardContent) {
+                this.checkClipboard(true); // true 表示由用户手势触发
+            }
+        }, { once: false });
 
         // 设置面板事件
         if (this.settingsBtn) {
@@ -991,14 +1012,27 @@ class XHSWebUI {
         };
     }
 
+    isIOS() {
+        return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    }
+
     // 剪贴板检测核心逻辑
-    async checkClipboard() {
+    async checkClipboard(isGesture = false) {
         try {
             // 如果不在提取页面，不执行自动填装
             const extractPage = document.getElementById('extract-page');
-            if (!extractPage.classList.contains('active')) return;
+            if (!extractPage || !extractPage.classList.contains('active')) return;
 
-            // 部分浏览器可能需要用户交互后才能读取，这里尝试静默读取
+            // 检查环境支持
+            if (!navigator.clipboard || !navigator.clipboard.readText) {
+                if (isGesture) console.log('当前环境（可能是非 HTTPS）不支持剪贴板访问');
+                return;
+            }
+
+            // iOS Safari 限制：必须在用户手势（如点击）的任务周期内才能读取
+            // 如果不是由点击触发，且是 iOS，则跳过，等待用户点击页面
+            if (this.isIOS() && !isGesture) return;
+
             const text = await navigator.clipboard.readText();
             if (!text || text === this.lastClipboardContent) return;
 
@@ -1008,8 +1042,8 @@ class XHSWebUI {
                 await this.autoTypeEffect(text);
             }
         } catch (err) {
-            // 权限受限或不支持剪贴板 API，静默失败
-            console.log('剪贴板访问受限:', err);
+            // 权限受限或不支持剪贴板 API
+            if (isGesture) console.log('剪贴板访问受限:', err);
         }
     }
 
