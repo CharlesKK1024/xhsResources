@@ -375,9 +375,14 @@ class XHSWebUI {
         this.noteDetailViewer.style.display = 'flex';
         document.body.style.overflow = 'hidden';
 
+        const isMobile = this.isIOS() || this.isAndroid();
+
         // 渲染作者信息
         this.noteAuthorName.textContent = note.author || '未知作者';
-        this.noteAvatar.src = this.getMediaUrl(note.cover);
+        const coverUrl = (isMobile && note.raw_cover) ? note.raw_cover : note.cover;
+        const noteAvatarUrl = this.getMediaUrl(coverUrl);
+        this.noteAvatar.setAttribute('referrerpolicy', 'no-referrer');
+        this.noteAvatar.src = noteAvatarUrl;
         
         // 渲染分享图标
         if (this.noteShareBtn && window.svgIconShare) {
@@ -387,17 +392,34 @@ class XHSWebUI {
         // 渲染媒体内容
         this.noteMediaWrapper.innerHTML = '';
         this.noteMediaDots.innerHTML = '';
-        const mediaUrls = (note.images && note.images.length > 0) ? 
-                         note.images.map(img => img.url) : 
-                         (note.videos && note.videos.length > 0 ? note.videos.map(v => v.url) : []);
         
-        this.noteMediaList = mediaUrls;
+        let mediaItems = [];
+        if (note.images && note.images.length > 0) {
+            mediaItems = note.images;
+        } else if (note.videos && note.videos.length > 0) {
+            mediaItems = note.videos;
+        }
+
+        this.noteMediaList = mediaItems.map(item => {
+            return (isMobile && item.raw_url) ? item.raw_url : item.url;
+        });
         this.noteMediaIndex = 0;
 
-        mediaUrls.forEach((url, i) => {
+        this.noteMediaList.forEach((url, i) => {
             const item = document.createElement('div');
             item.className = 'note-media-item';
-            item.innerHTML = `<img src="${this.getMediaUrl(url)}" loading="lazy">`;
+            
+            const img = document.createElement('img');
+            img.setAttribute('loading', 'lazy');
+            img.setAttribute('referrerpolicy', 'no-referrer');
+            img.src = this.getMediaUrl(url);
+            
+            // 点击图片进入全屏浏览
+            img.onclick = () => {
+                this.openViewer(this.noteMediaList, i);
+            };
+            
+            item.appendChild(img);
             this.noteMediaWrapper.appendChild(item);
 
             const dot = document.createElement('div');
@@ -523,7 +545,11 @@ class XHSWebUI {
         document.getElementById('commentCount').textContent = this.formatNum(data.commentCount);
 
         const cover = document.getElementById('coverImg');
-        cover.src = this.getMediaUrl(data.cover);
+        const coverUrl = this.getMediaUrl(data.cover);
+        
+        // 强制设置 no-referrer 以绕开 cpolar
+        cover.setAttribute('referrerpolicy', 'no-referrer');
+        cover.src = coverUrl;
         
         // 封面加载失败时的回退逻辑
         cover.onerror = () => {
@@ -572,21 +598,34 @@ class XHSWebUI {
         const media = data.images.length > 0 ? data.images : data.videos;
         if (!media.length) return;
 
+        const isMobile = this.isIOS() || this.isAndroid();
+
         media.forEach((item, i) => {
             const div = document.createElement('div');
             div.className = 'preview-item';
-            if (data.cover === item.url || data.cover === this.getMediaUrl(item.url)) {
-                div.classList.add('is-cover');
-            }
             
-            const url = this.getMediaUrl(item.url);
+            // 如果是移动端，优先使用原始 URL (item.raw_url 或 item.url 只要不是 /web/cache 开头的)
+            let displayUrl = item.url;
+            if (isMobile && item.raw_url) {
+                displayUrl = item.raw_url;
+            }
+
+            const url = this.getMediaUrl(displayUrl);
+            
+            // 1. 手动创建 img 元素，确保兼容性并强制绕开 cpolar
+            const img = document.createElement('img');
+            img.setAttribute('loading', 'lazy');
+            img.setAttribute('referrerpolicy', 'no-referrer'); // 强制设置 no-referrer 绕过防盗链
+            img.src = url; // 最后再赋值 src 触发加载
+
+            // 2. 设置按钮和其他结构
             div.innerHTML = `
-                <img src="${url}" loading="lazy" referrerpolicy="no-referrer">
                 <div class="preview-actions">
                     <button class="action-icon-btn set-cover-btn" title="设为封面">🖼️</button>
                     <button class="action-icon-btn delete-media-btn" title="永久删除">🗑️</button>
                 </div>
             `;
+            div.prepend(img); // 把图片插到按钮前面
             
             // 设为封面逻辑
             const setCoverBtn = div.querySelector('.set-cover-btn');
@@ -918,8 +957,24 @@ class XHSWebUI {
 
     getMediaUrl(url) {
         if (!url) return this.getPlaceholder();
+        
+        // 如果是移动端访问，强制不走缓存（不走 cpolar），直接走原始 URL 并配合 no-referrer
+        if (this.isIOS() || this.isAndroid()) {
+            // 如果已经是缓存路径，说明原始 URL 可能丢失，但通常 data 里会带原始 url
+            // 这里我们优先返回原始 URL
+            if (url.startsWith('/web/cache')) {
+                // 如果是缓存路径且我们无法找回原始 URL，则只能走缓存
+                return url;
+            }
+            return url;
+        }
+
         if (url.startsWith('/web/cache')) return url;
         return `/web/api/proxy?url=${encodeURIComponent(url)}`;
+    }
+
+    isAndroid() {
+        return /Android/i.test(navigator.userAgent);
     }
 
     async copyLinks() {

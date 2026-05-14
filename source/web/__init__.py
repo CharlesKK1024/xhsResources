@@ -236,6 +236,7 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
                 "images": _parse_images(note),
                 "videos": _parse_videos(note),
                 "cover": _get_cover(note),
+                "raw_cover": _get_cover(note), # 保留原始封面供移动端直连
                 "url": url
             }
 
@@ -247,11 +248,13 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
 
             # 预先为作品中的所有媒体建立缓存映射，并更新返回的 URL 为本地路径
             for img in data["images"]:
+                img["raw_url"] = img["url"] # 保留原始 URL
                 cache_url = await download_to_cache(img["url"], f"{note_id}_img.png", data, recorder, force_refresh=refresh)
                 if cache_url.startswith("/web/cache"):
                     img["url"] = cache_url
                     
             for vid in data["videos"]:
+                vid["raw_url"] = vid["url"] # 保留原始 URL
                 cache_url = await download_to_cache(vid["url"], f"{note_id}_vid.mp4", data, recorder, force_refresh=refresh)
                 if cache_url.startswith("/web/cache"):
                     vid["url"] = cache_url
