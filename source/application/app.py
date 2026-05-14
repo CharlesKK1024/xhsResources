@@ -196,6 +196,9 @@ class XHS:
         container["下载地址"], container["动图地址"] = self.image.get_image_link(
             data, self.manager.image_format
         )
+        # 显式设置封面
+        if container["下载地址"]:
+            container["封面"] = container["下载地址"][0]
 
     def __extract_video(
         self,
@@ -209,6 +212,10 @@ class XHS:
         container["动图地址"] = [
             None,
         ]
+        # 视频作品的封面通常在 imageList 中
+        images, _ = self.image.get_image_link(data, "webp")
+        if images:
+            container["封面"] = images[0]
 
     async def __download_files(
         self,

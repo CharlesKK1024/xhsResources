@@ -546,7 +546,7 @@ body {
 }
 
 .note-detail-header {
-    height: calc(7vh + env(safe-area-inset-top));
+    height: calc(5.8vh + env(safe-area-inset-top));
     padding-top: env(safe-area-inset-top);
     padding-left: 4vw;
     padding-right: 4vw;
@@ -619,56 +619,47 @@ body {
     display: flex;
     align-items: center;
     overflow: hidden;
+    height: 80vh;
 }
 
 .note-media-wrapper {
-    display: flex;
     width: 100%;
-    transition: transform 0.3s ease-out;
+    height: 100%;
 }
 
 .note-media-item {
-    flex: 0 0 100%;
+    position: relative;
     width: 100%;
-    display: flex;
+    height: 100%;
+    display: none;
     justify-content: center;
     align-items: center;
     background-color: #1B1B1B;
 }
 
+.note-media-item.active {
+    display: flex;
+}
+
 .note-media-item img {
     width: 100%;
-    max-height: 80vh;
+    height: 100%;
     object-fit: contain;
 }
 
-/* Live 图角标 */
-.live-badge {
+.live-pill-group {
     position: absolute;
-    top: 2vh;
-    left: 4vw;
-    background: rgba(0, 0, 0, 0.6);
-    color: white;
-    padding: 0.4vh 2vw;
-    border-radius: 0.8vh;
-    font-size: 1.2vh;
+    top: 1.5vh;
+    left: 1.5vh;
     display: flex;
-    align-items: center;
-    gap: 1vw;
+    flex-direction: row;
+    gap: 0.8vh;
     z-index: 10;
-    pointer-events: none;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-}
-
-.live-badge::before {
-    content: '◎';
-    font-weight: bold;
-    color: #00f2fe;
 }
 
 .note-media-item video.live-video {
     width: 100%;
-    max-height: 80vh;
+    height: 100%;
     object-fit: contain;
     display: none; /* 默认隐藏，长按或点击切换显示 */
 }
@@ -679,11 +670,12 @@ body {
 
 .note-media-item.playing-live video.live-video {
     display: block;
+    z-index: 3;
 }
 
 .note-media-counter {
     position: absolute;
-    top: 2vh;
+    top: 1.5vh;
     right: 4vw;
     background-color: rgba(0,0,0,0.4);
     color: white;
@@ -1107,6 +1099,59 @@ body {
     padding: 6vh;
     color: var(--text-muted);
     font-size: 1.6vh;
+}
+
+.live-pill {
+    background: rgba(0, 0, 0, 0.4);
+    color: #fff;
+    padding: 0.4vh 1vh;
+    border-radius: 5vh;
+    font-size: 1.2vh;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 0.4vh;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 0.5px solid rgba(255, 255, 255, 0.2);
+}
+
+.live-badge {
+    pointer-events: none;
+}
+
+.live-icon {
+    font-size: 1.4vh;
+}
+
+.live-replay-btn {
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.live-replay-btn:hover {
+    transform: scale(1.05);
+    background: rgba(0, 0, 0, 0.55);
+}
+
+.live-video {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    opacity: 0;
+    transition: opacity 0.3s;
+    z-index: 2;
+}
+
+.playing-live .live-video {
+    opacity: 1;
+}
+
+.playing-live img {
+    opacity: 0;
 }
 
 /* 全景查看器样式 */

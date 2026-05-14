@@ -23,6 +23,15 @@ STATIC_DIR = ROOT / "static" / "web"
 CACHE_DIR = ROOT / "Cache"
 
 
+def _normalize_media_url(url: str) -> str:
+    """规范化媒体地址，避免 HTTPS 页面内嵌 HTTP 资源导致黑屏。"""
+    if not url:
+        return ""
+    if "xhscdn.com" in url and url.startswith("http://"):
+        return "https://" + url[len("http://"):]
+    return url
+
+
 def get_today_cache_dir() -> Path:
     """获取今天的缓存目录：Cache/YYYYMMDD/"""
     today = datetime.now().strftime("%Y%m%d")
@@ -131,29 +140,55 @@ async def download_to_cache(url: str, filename: str, note_info: dict = None, rec
 
 def _parse_images(note: dict) -> list:
     """从 note 数据中解析图片列表，包含 Live 图支持"""
-    images = note.get("图片列表", [])
-    live_links = note.get("Live图链接", [])
+    # 如果是纯视频作品，不应该有图片列表（除非是视频的第一帧）
+    if note.get("作品类型") == "视频":
+        return []
+        
+    # 小红书原始数据中：
+    # "下载地址" 存放的是图片 URL 列表
+    # "动图地址" 存放的是 Live 图视频 URL 列表（如果有）
+    images = note.get("下载地址", [])
+    live_links = note.get("动图地址", [])
+    
+    # 如果是字符串，说明还没被拆分成列表（防御性处理）
+    if isinstance(images, str):
+        images = images.split()
+    if isinstance(live_links, str):
+        live_links = live_links.split()
     
     parsed = []
     for i, url in enumerate(images):
-        item = {"url": url, "index": i + 1}
-        # 如果当前索引有对应的 Live 图视频链接
-        if i < len(live_links) and live_links[i]:
-            item["live_url"] = live_links[i]
+        # 排除掉 NaN 这种占位符
+        if not url or url == "NaN":
+            continue
+            
+        item = {"url": _normalize_media_url(url), "index": i + 1}
+        # 匹配对应的 Live 图视频链接
+        if i < len(live_links) and live_links[i] and live_links[i] != "NaN":
+            item["live_url"] = _normalize_media_url(live_links[i])
         parsed.append(item)
     return parsed
 
 
 def _parse_videos(note: dict) -> list:
-    urls = note.get("下载地址", [])
-    if not urls:
+    # 只有当作品类型确实是 "视频" 时，才返回视频列表
+    # 如果是 Live 图（图文类型），视频链接已经在 images 里处理了，这里不重复返回
+    if note.get("作品类型") != "视频":
         return []
-    return [{"url": urls[0]}]
+        
+    urls = note.get("下载地址", [])
+    if isinstance(urls, str):
+        urls = urls.split()
+        
+    if not urls or urls[0] == "NaN":
+        return []
+    return [{"url": _normalize_media_url(urls[0])}]
 
 
 def _get_cover(note: dict) -> str:
-    urls = note.get("下载地址", [])
-    return urls[0] if urls else ""
+    # 优先使用我们在 app.py 中新增的 "封面" 字段
+    cover = note.get("封面") or (note.get("下载地址", [])[0] if note.get("下载地址") else "")
+    return _normalize_media_url(cover)
 
 
 def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
@@ -223,6 +258,16 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
                 )
 
             note = result[0]
+            
+            # 【调试代码】保存原始数据结构到文件，方便你查看
+            try:
+                debug_path = Path("f:/AIcoding/XHSresources/xhsResources/debug_note.json")
+                with open(debug_path, "w", encoding="utf-8") as f:
+                    json.dump(note, f, ensure_ascii=False, indent=4)
+                print(f"DEBUG: 原始数据已保存至 {debug_path}")
+            except Exception as e:
+                print(f"DEBUG: 保存失败 {e}")
+
             note_id = note.get("作品ID")
             if not note_id:
                 return JSONResponse({"error": "数据解析失败"}, status_code=400)
@@ -260,11 +305,12 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
                 # 如果是 Live 图，识别其视频部分
                 live_url = img.get("live_url")
                 if live_url:
+                    img["raw_live_url"] = live_url
                     # 缓存 Live 图的视频部分
-                    cache_live_url = await download_to_cache(live_url, f"{note_id}_live.mp4", data, recorder, force_refresh=refresh)
+                    cache_live_url = await download_to_cache(live_url, f"{note_id}_live_{img['index']}.mp4", data, recorder, force_refresh=refresh)
                     img["live_url_cached"] = cache_live_url
 
-                cache_url = await download_to_cache(img["url"], f"{note_id}_img.png", data, recorder, force_refresh=refresh)
+                cache_url = await download_to_cache(img["url"], f"{note_id}_img_{img['index']}.png", data, recorder, force_refresh=refresh)
                 if cache_url.startswith("/web/cache"):
                     img["url"] = cache_url
                     

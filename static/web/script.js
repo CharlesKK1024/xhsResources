@@ -217,16 +217,46 @@ class XHSWebUI {
         
         // 笔记详情图片滑动切换
         let noteTouchStartX = 0;
+        let noteTouchStartY = 0;
+        let noteGestureLock = '';
         this.noteMediaWrapper.addEventListener('touchstart', (e) => {
             noteTouchStartX = e.touches[0].clientX;
+            noteTouchStartY = e.touches[0].clientY;
+            noteGestureLock = '';
         }, { passive: true });
+        this.noteMediaWrapper.addEventListener('touchmove', (e) => {
+            const touch = e.touches[0];
+            const diffX = touch.clientX - noteTouchStartX;
+            const diffY = touch.clientY - noteTouchStartY;
+            const absX = Math.abs(diffX);
+            const absY = Math.abs(diffY);
+
+            if (!noteGestureLock && (absX > 10 || absY > 10)) {
+                noteGestureLock = absX > absY ? 'horizontal' : 'vertical';
+            }
+
+            if (noteGestureLock === 'horizontal') {
+                if (e.cancelable) e.preventDefault();
+                e.stopPropagation();
+            }
+        }, { passive: false });
         this.noteMediaWrapper.addEventListener('touchend', (e) => {
+            const touchEndY = e.changedTouches[0].clientY;
             const touchEndX = e.changedTouches[0].clientX;
-            const diff = touchEndX - noteTouchStartX;
-            if (Math.abs(diff) > 50) {
-                if (diff > 0) this.prevNoteMedia();
+            const diffX = touchEndX - noteTouchStartX;
+            const diffY = touchEndY - noteTouchStartY;
+            if (noteGestureLock === 'horizontal' && Math.abs(diffX) > 50 && Math.abs(diffX) > Math.abs(diffY)) {
+                e.stopPropagation();
+                if (diffX > 0) this.prevNoteMedia();
+                else this.nextNoteMedia();
+            } else if (Math.abs(diffX) > 50 && Math.abs(diffX) > Math.abs(diffY)) {
+                if (diffX > 0) this.prevNoteMedia();
                 else this.nextNoteMedia();
             }
+            noteGestureLock = '';
+        }, { passive: true });
+        this.noteMediaWrapper.addEventListener('touchcancel', () => {
+            noteGestureLock = '';
         }, { passive: true });
 
         // 键盘支持
@@ -486,37 +516,131 @@ class XHSWebUI {
             container.appendChild(img);
 
             // Live 图处理
-            const liveUrl = (isMobile && item.live_url) ? item.live_url : item.live_url_cached;
+            const liveUrl = isMobile
+                ? (item.raw_live_url || item.live_url || item.live_url_cached || '')
+                : (item.live_url_cached || item.raw_live_url || item.live_url || '');
             if (liveUrl) {
-                // 添加 Live 标识
+                // 添加 Live 标识和重播按钮
+                const pillGroup = document.createElement('div');
+                pillGroup.className = 'live-pill-group';
+                container.appendChild(pillGroup);
+
                 const badge = document.createElement('div');
-                badge.className = 'live-badge';
-                badge.textContent = 'Live';
-                container.appendChild(badge);
+                badge.className = 'live-badge live-pill';
+                badge.innerHTML = '<span class="live-icon">◎</span> Live';
+                pillGroup.appendChild(badge);
+
+                const replayBtn = document.createElement('div');
+                replayBtn.className = 'live-replay-btn live-pill';
+                replayBtn.innerHTML = '🔄 重播';
+                replayBtn.style.display = 'none'; // 初始隐藏
+                pillGroup.appendChild(replayBtn);
 
                 // 创建视频元素（用于播放 Live 动态部分）
                 const video = document.createElement('video');
                 video.className = 'live-video';
-                video.src = this.getMediaUrl(liveUrl);
-                video.loop = true;
+                video.src = this.getVideoUrl(liveUrl);
+                
+                // 加上保命属性
                 video.muted = true;
+                video.defaultMuted = true;
                 video.playsInline = true;
+                video.setAttribute('webkit-playsinline', '');
+                video.preload = 'auto';
                 video.setAttribute('referrerpolicy', 'no-referrer');
                 container.appendChild(video);
 
-                // 交互：长按播放 Live
+                let shouldPlayLive = false;
+                let liveReady = false;
+                let livePlayWithSound = false;
+
+                const resetLiveState = (showReplay = true) => {
+                    shouldPlayLive = false;
+                    livePlayWithSound = false;
+                    container.classList.remove('playing-live');
+                    replayBtn.style.display = showReplay ? 'inline-flex' : 'none';
+                    video.pause();
+                    video.muted = true;
+                    video.volume = 0;
+                    try {
+                        video.currentTime = 0;
+                    } catch (e) {
+                        console.log('重置 Live 视频进度失败:', e);
+                    }
+                };
+
+                const tryStartPlayback = async () => {
+                    if (!shouldPlayLive) return;
+                    if (video.readyState < 2) return;
+                    video.muted = !livePlayWithSound;
+                    video.volume = livePlayWithSound ? 1 : 0;
+                    try {
+                        video.currentTime = 0;
+                    } catch (e) {
+                        console.log('设置 Live 视频进度失败:', e);
+                    }
+                    try {
+                        await video.play();
+                    } catch (e) {
+                        console.log('播放被拦截或失败:', e);
+                        resetLiveState(true);
+                    }
+                };
+
+                const playLiveOnce = (withSound = false) => {
+                    shouldPlayLive = true;
+                    livePlayWithSound = withSound;
+                    replayBtn.style.display = 'none';
+                    if (video.readyState < 2) {
+                        liveReady = false;
+                        video.load();
+                        return;
+                    }
+                    tryStartPlayback();
+                };
+
+                video.addEventListener('loadeddata', () => {
+                    liveReady = true;
+                    tryStartPlayback();
+                });
+
+                video.addEventListener('canplay', () => {
+                    liveReady = true;
+                    tryStartPlayback();
+                });
+
+                video.addEventListener('playing', () => {
+                    if (!shouldPlayLive || !liveReady) return;
+                    container.classList.add('playing-live');
+                });
+
+                video.onended = () => {
+                    resetLiveState(true);
+                };
+
+                video.onerror = () => {
+                    console.log('Live 视频加载失败:', video.currentSrc || liveUrl);
+                    resetLiveState(false);
+                };
+
+                // 交互：进入该页时自动播放一次
+                if (i === this.noteMediaIndex) {
+                    setTimeout(() => playLiveOnce(false), 500);
+                }
+
+                // 点击重播按钮重新播放
+                replayBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    playLiveOnce(true);
+                };
+
+                // 长按播放逻辑 (保留并增强)
                 let liveTimer = null;
                 const startLive = () => {
-                    liveTimer = setTimeout(() => {
-                        container.classList.add('playing-live');
-                        video.play();
-                    }, 200);
+                    liveTimer = setTimeout(() => playLiveOnce(true), 200);
                 };
                 const stopLive = () => {
                     clearTimeout(liveTimer);
-                    container.classList.remove('playing-live');
-                    video.pause();
-                    video.currentTime = 0;
                 };
 
                 container.addEventListener('mousedown', startLive);
@@ -582,8 +706,37 @@ class XHSWebUI {
     }
 
     updateNoteMediaUI() {
-        const offset = -this.noteMediaIndex * 100;
-        this.noteMediaWrapper.style.transform = `translateX(${offset}%)`;
+        const mediaItems = this.noteMediaWrapper.querySelectorAll('.note-media-item');
+        mediaItems.forEach((item, index) => {
+            item.classList.toggle('active', index === this.noteMediaIndex);
+            const video = item.querySelector('.live-video');
+            const replayBtn = item.querySelector('.live-replay-btn');
+            if (index !== this.noteMediaIndex) {
+                item.classList.remove('playing-live');
+                if (video) {
+                    video.pause();
+                    try {
+                        video.currentTime = 0;
+                    } catch (e) {
+                        console.log('切换媒体时重置 Live 视频失败:', e);
+                    }
+                }
+                if (replayBtn) replayBtn.style.display = 'none';
+                return;
+            }
+
+            if (!video) return;
+            if (replayBtn && !item.classList.contains('playing-live')) {
+                setTimeout(() => {
+                    const hidden = replayBtn.style.display === 'none' || replayBtn.style.display === '';
+                    if (hidden) {
+                        const clickEvent = new MouseEvent('click', { bubbles: true });
+                        replayBtn.dispatchEvent(clickEvent);
+                    }
+                }, 250);
+            }
+        });
+
         this.noteMediaCounter.textContent = `${this.noteMediaIndex + 1}/${this.noteMediaList.length}`;
         
         const dots = this.noteMediaDots.querySelectorAll('.media-dot');
@@ -736,6 +889,19 @@ class XHSWebUI {
                     <button class="action-icon-btn delete-media-btn" title="永久删除">🗑️</button>
                 </div>
             `;
+
+            // 如果是 Live 图，在预览列表也显示标识
+            const liveUrl = (isMobile && item.live_url) ? item.live_url : item.live_url_cached;
+            if (liveUrl) {
+                const liveBadge = document.createElement('div');
+                liveBadge.className = 'live-badge';
+                liveBadge.style.transform = 'scale(0.8)';
+                liveBadge.style.top = '0.5vh';
+                liveBadge.style.left = '0.5vh';
+                liveBadge.innerHTML = '<span class="live-icon">◎</span> Live';
+                div.appendChild(liveBadge);
+            }
+
             div.prepend(img); // 把图片插到按钮前面
             
             // 设为封面逻辑
@@ -1068,6 +1234,10 @@ class XHSWebUI {
 
     getMediaUrl(url) {
         if (!url) return this.getPlaceholder();
+
+        if (typeof url === 'string' && url.includes('xhscdn.com') && url.startsWith('http://')) {
+            url = `https://${url.slice('http://'.length)}`;
+        }
         
         // 如果是移动端访问，强制不走缓存（不走 cpolar），直接走原始 URL 并配合 no-referrer
         if (this.isIOS() || this.isAndroid()) {
@@ -1082,6 +1252,18 @@ class XHSWebUI {
 
         if (url.startsWith('/web/cache')) return url;
         return `/web/api/proxy?url=${encodeURIComponent(url)}`;
+    }
+
+    getVideoUrl(url) {
+        if (!url) return '';
+
+        if (typeof url === 'string' && url.includes('xhscdn.com') && url.startsWith('http://')) {
+            url = `https://${url.slice('http://'.length)}`;
+        }
+
+        // Live 视频不走图片代理；本地缓存直接用缓存路径，远程地址直接直连
+        if (url.startsWith('/web/cache')) return url;
+        return url;
     }
 
     isAndroid() {
