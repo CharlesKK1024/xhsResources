@@ -130,10 +130,18 @@ async def download_to_cache(url: str, filename: str, note_info: dict = None, rec
 
 
 def _parse_images(note: dict) -> list:
-    urls = note.get("下载地址", [])
-    if not urls:
-        return []
-    return [{"url": u, "index": i + 1} for i, u in enumerate(urls)]
+    """从 note 数据中解析图片列表，包含 Live 图支持"""
+    images = note.get("图片列表", [])
+    live_links = note.get("Live图链接", [])
+    
+    parsed = []
+    for i, url in enumerate(images):
+        item = {"url": url, "index": i + 1}
+        # 如果当前索引有对应的 Live 图视频链接
+        if i < len(live_links) and live_links[i]:
+            item["live_url"] = live_links[i]
+        parsed.append(item)
+    return parsed
 
 
 def _parse_videos(note: dict) -> list:
@@ -249,6 +257,13 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
             # 预先为作品中的所有媒体建立缓存映射，并更新返回的 URL 为本地路径
             for img in data["images"]:
                 img["raw_url"] = img["url"] # 保留原始 URL
+                # 如果是 Live 图，识别其视频部分
+                live_url = img.get("live_url")
+                if live_url:
+                    # 缓存 Live 图的视频部分
+                    cache_live_url = await download_to_cache(live_url, f"{note_id}_live.mp4", data, recorder, force_refresh=refresh)
+                    img["live_url_cached"] = cache_live_url
+
                 cache_url = await download_to_cache(img["url"], f"{note_id}_img.png", data, recorder, force_refresh=refresh)
                 if cache_url.startswith("/web/cache"):
                     img["url"] = cache_url

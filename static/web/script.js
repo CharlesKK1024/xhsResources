@@ -160,6 +160,61 @@ class XHSWebUI {
         // 笔记详情事件
         this.noteDetailBack.onclick = () => this.closeNoteDetail();
         
+        // 笔记详情：下拉关闭手势
+        let detailTouchStartY = 0;
+        let detailTouchStartX = 0;
+        let isPullingDown = false;
+        
+        this.noteDetailViewer.addEventListener('touchstart', (e) => {
+            // 只有当内容区域滚动到顶部时，才允许触发下拉关闭
+            const content = this.noteDetailViewer.querySelector('.note-detail-content');
+            if (content.scrollTop <= 0) {
+                detailTouchStartY = e.touches[0].clientY;
+                detailTouchStartX = e.touches[0].clientX;
+                isPullingDown = true;
+                this.noteDetailViewer.style.transition = 'none';
+            } else {
+                isPullingDown = false;
+            }
+        }, { passive: true });
+
+        this.noteDetailViewer.addEventListener('touchmove', (e) => {
+            if (!isPullingDown) return;
+            
+            const currentY = e.touches[0].clientY;
+            const currentX = e.touches[0].clientX;
+            const diffY = currentY - detailTouchStartY;
+            const diffX = Math.abs(currentX - detailTouchStartX);
+            
+            // 如果向下移动且垂直位移大于水平位移，判定为下拉关闭
+            if (diffY > 0 && diffY > diffX) {
+                // 增加阻尼感
+                const translate = Math.pow(diffY, 0.85);
+                this.noteDetailViewer.style.transform = `translateY(${translate}px)`;
+                
+                // 阻止默认滚动
+                if (e.cancelable) e.preventDefault();
+            }
+        }, { passive: false });
+
+        this.noteDetailViewer.addEventListener('touchend', (e) => {
+            if (!isPullingDown) return;
+            
+            const currentY = e.changedTouches[0].clientY;
+            const diffY = currentY - detailTouchStartY;
+            
+            this.noteDetailViewer.style.transition = 'transform 0.3s cubic-bezier(0.23, 1, 0.32, 1)';
+            
+            // 下拉超过 150px 则关闭
+            if (diffY > 150) {
+                this.closeNoteDetail();
+            } else {
+                // 否则回弹
+                this.noteDetailViewer.style.transform = 'translateY(0)';
+            }
+            isPullingDown = false;
+        }, { passive: true });
+        
         // 笔记详情图片滑动切换
         let noteTouchStartX = 0;
         this.noteMediaWrapper.addEventListener('touchstart', (e) => {
@@ -372,7 +427,16 @@ class XHSWebUI {
     // 笔记详情核心方法
     openNoteDetail(note) {
         if (!note) return;
+        this.noteDetailViewer.style.transition = 'none';
+        this.noteDetailViewer.style.transform = 'translateY(100%)';
         this.noteDetailViewer.style.display = 'flex';
+        
+        // 强制重绘
+        this.noteDetailViewer.offsetHeight;
+        
+        this.noteDetailViewer.style.transition = 'transform 0.3s cubic-bezier(0.23, 1, 0.32, 1)';
+        this.noteDetailViewer.style.transform = 'translateY(0)';
+        
         document.body.style.overflow = 'hidden';
 
         const isMobile = this.isIOS() || this.isAndroid();
@@ -405,12 +469,12 @@ class XHSWebUI {
         });
         this.noteMediaIndex = 0;
 
-        this.noteMediaList.forEach((url, i) => {
-            const item = document.createElement('div');
-            item.className = 'note-media-item';
+        mediaItems.forEach((item, i) => {
+            const url = (isMobile && item.raw_url) ? item.raw_url : item.url;
+            const container = document.createElement('div');
+            container.className = 'note-media-item';
             
             const img = document.createElement('img');
-            img.setAttribute('loading', 'lazy');
             img.setAttribute('referrerpolicy', 'no-referrer');
             img.src = this.getMediaUrl(url);
             
@@ -419,8 +483,50 @@ class XHSWebUI {
                 this.openViewer(this.noteMediaList, i);
             };
             
-            item.appendChild(img);
-            this.noteMediaWrapper.appendChild(item);
+            container.appendChild(img);
+
+            // Live 图处理
+            const liveUrl = (isMobile && item.live_url) ? item.live_url : item.live_url_cached;
+            if (liveUrl) {
+                // 添加 Live 标识
+                const badge = document.createElement('div');
+                badge.className = 'live-badge';
+                badge.textContent = 'Live';
+                container.appendChild(badge);
+
+                // 创建视频元素（用于播放 Live 动态部分）
+                const video = document.createElement('video');
+                video.className = 'live-video';
+                video.src = this.getMediaUrl(liveUrl);
+                video.loop = true;
+                video.muted = true;
+                video.playsInline = true;
+                video.setAttribute('referrerpolicy', 'no-referrer');
+                container.appendChild(video);
+
+                // 交互：长按播放 Live
+                let liveTimer = null;
+                const startLive = () => {
+                    liveTimer = setTimeout(() => {
+                        container.classList.add('playing-live');
+                        video.play();
+                    }, 200);
+                };
+                const stopLive = () => {
+                    clearTimeout(liveTimer);
+                    container.classList.remove('playing-live');
+                    video.pause();
+                    video.currentTime = 0;
+                };
+
+                container.addEventListener('mousedown', startLive);
+                container.addEventListener('mouseup', stopLive);
+                container.addEventListener('mouseleave', stopLive);
+                container.addEventListener('touchstart', startLive, { passive: true });
+                container.addEventListener('touchend', stopLive, { passive: true });
+            }
+
+            this.noteMediaWrapper.appendChild(container);
 
             const dot = document.createElement('div');
             dot.className = `media-dot ${i === 0 ? 'active' : ''}`;
@@ -452,8 +558,13 @@ class XHSWebUI {
     }
 
     closeNoteDetail() {
-        this.noteDetailViewer.style.display = 'none';
-        document.body.style.overflow = '';
+        this.noteDetailViewer.style.transition = 'transform 0.3s cubic-bezier(0.23, 1, 0.32, 1)';
+        this.noteDetailViewer.style.transform = 'translateY(100%)';
+        setTimeout(() => {
+            this.noteDetailViewer.style.display = 'none';
+            this.noteDetailViewer.style.transform = 'translateY(0)';
+            document.body.style.overflow = '';
+        }, 300);
     }
 
     prevNoteMedia() {
