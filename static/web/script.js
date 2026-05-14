@@ -7,11 +7,13 @@ class XHSWebUI {
     init() {
         // 提取页面元素
         this.urlInput = document.getElementById('urlInput');
-        this.cookieInput = document.getElementById('cookieInput');
         this.fetchBtn = document.getElementById('fetchBtn');
         this.clearBtn = document.getElementById('clearBtn');
         this.refreshBtn = document.getElementById('refreshBtn');
         this.loading = document.getElementById('loading');
+        if (this.loading && window.generateLoadingWave) {
+            this.loading.innerHTML = window.generateLoadingWave();
+        }
         this.result = document.getElementById('result');
         this.error = document.getElementById('error');
         this.errorMsg = document.getElementById('errorMsg');
@@ -24,6 +26,17 @@ class XHSWebUI {
         this.cardScaler = document.getElementById('cardScaler');
         this.scaleRange = document.getElementById('scaleRange');
         this.scaleValue = document.getElementById('scaleValue');
+        
+        // 设置面板元素
+        this.settingsBtn = document.getElementById('settingsBtn');
+        this.settingsPanel = document.getElementById('settingsPanel');
+        this.closeSettings = document.getElementById('closeSettings');
+        this.saveSettingsBtn = document.getElementById('saveSettings');
+        this.settingPath = document.getElementById('settingPath');
+        this.settingImageFormat = document.getElementById('settingImageFormat');
+        this.settingVideoPref = document.getElementById('settingVideoPref');
+        this.settingProxy = document.getElementById('settingProxy');
+        this.settingCookie = document.getElementById('settingCookie');
         
         // 全景查看器元素
         this.fullViewer = document.getElementById('fullViewer');
@@ -39,11 +52,30 @@ class XHSWebUI {
         this.waterfallContent = document.getElementById('waterfallContent');
         this.waterfallClose = this.waterfallViewer.querySelector('.waterfall-close');
         
+        // 笔记详情查看器元素
+        this.noteDetailViewer = document.getElementById('noteDetailViewer');
+        this.noteDetailBack = this.noteDetailViewer.querySelector('.note-detail-back');
+        this.noteMediaWrapper = document.getElementById('noteMediaWrapper');
+        this.noteMediaCounter = document.getElementById('noteMediaCounter');
+        this.noteMediaDots = document.getElementById('noteMediaDots');
+        this.noteDetailTitle = document.getElementById('noteDetailTitle');
+        this.noteDetailDesc = document.getElementById('noteDetailDesc');
+        this.noteDetailTags = document.getElementById('noteDetailTags');
+        this.noteDetailTime = document.getElementById('noteDetailTime');
+        this.noteAvatar = document.getElementById('noteAvatar');
+        this.noteAuthorName = document.getElementById('noteAuthorName');
+        this.noteShareBtn = document.getElementById('noteShareBtn');
+        this.noteLikeCount = document.getElementById('noteLikeCount');
+        this.noteCollectCount = document.getElementById('noteCollectCount');
+        this.noteCommentCount = document.getElementById('noteCommentCount');
+
         // 状态
         this.isEditMode = false;
         this.swipeInstances = [];
         this.viewerList = []; // 当前查看器中的图片列表
         this.viewerIndex = 0; // 当前图片索引
+        this.noteMediaIndex = 0; // 笔记详情媒体索引
+        this.lastClipboardContent = ''; // 记录上次处理的剪贴板内容
         
         // 导航元素
         this.navItems = document.querySelectorAll('.nav-item');
@@ -114,6 +146,23 @@ class XHSWebUI {
         // 瀑布流事件
         this.waterfallClose.onclick = () => this.closeWaterfall();
         
+        // 笔记详情事件
+        this.noteDetailBack.onclick = () => this.closeNoteDetail();
+        
+        // 笔记详情图片滑动切换
+        let noteTouchStartX = 0;
+        this.noteMediaWrapper.addEventListener('touchstart', (e) => {
+            noteTouchStartX = e.touches[0].clientX;
+        }, { passive: true });
+        this.noteMediaWrapper.addEventListener('touchend', (e) => {
+            const touchEndX = e.changedTouches[0].clientX;
+            const diff = touchEndX - noteTouchStartX;
+            if (Math.abs(diff) > 50) {
+                if (diff > 0) this.prevNoteMedia();
+                else this.nextNoteMedia();
+            }
+        }, { passive: true });
+
         // 键盘支持
         window.addEventListener('keydown', (e) => {
             if (this.fullViewer.style.display === 'flex') {
@@ -147,10 +196,52 @@ class XHSWebUI {
         this.historySort.addEventListener('change', () => this.loadHistory());
         
         this.collectionSearch.addEventListener('input', () => this.debounce(() => this.loadCollections(), 500)());
+
+        // 剪贴板监听：当页面获得焦点时检查
+        window.addEventListener('focus', () => this.checkClipboard());
+
+        // 设置面板事件
+        if (this.settingsBtn) {
+            this.settingsBtn.onclick = () => this.settingsPanel.style.display = 'flex';
+        }
+        if (this.closeSettings) {
+            this.closeSettings.onclick = () => this.settingsPanel.style.display = 'none';
+        }
+        if (this.saveSettingsBtn) {
+            this.saveSettingsBtn.onclick = () => this.saveSettings();
+        }
+        // 点击背景关闭设置
+        if (this.settingsPanel) {
+            this.settingsPanel.onclick = (e) => {
+                if (e.target === this.settingsPanel) this.settingsPanel.style.display = 'none';
+            };
+        }
     }
 
     async loadInitialData() {
-        // 默认显示提取页面，不需要初始加载数据
+        this.loadSettings();
+    }
+
+    loadSettings() {
+        const settings = JSON.parse(localStorage.getItem('xhs_settings') || '{}');
+        if (this.settingPath) this.settingPath.value = settings.path || '';
+        if (this.settingImageFormat) this.settingImageFormat.value = settings.imageFormat || 'webp';
+        if (this.settingVideoPref) this.settingVideoPref.value = settings.videoPref || 'resolution';
+        if (this.settingProxy) this.settingProxy.value = settings.proxy || '';
+        if (this.settingCookie) this.settingCookie.value = settings.cookie || '';
+    }
+
+    saveSettings() {
+        const settings = {
+            path: this.settingPath.value,
+            imageFormat: this.settingImageFormat.value,
+            videoPref: this.settingVideoPref.value,
+            proxy: this.settingProxy.value,
+            cookie: this.settingCookie.value
+        };
+        localStorage.setItem('xhs_settings', JSON.stringify(settings));
+        this.settingsPanel.style.display = 'none';
+        alert('设置已保存');
     }
 
     switchPage(targetId) {
@@ -257,6 +348,96 @@ class XHSWebUI {
         document.body.style.overflow = '';
     }
 
+    // 笔记详情核心方法
+    openNoteDetail(note) {
+        if (!note) return;
+        this.noteDetailViewer.style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+
+        // 渲染作者信息
+        this.noteAuthorName.textContent = note.author || '未知作者';
+        this.noteAvatar.src = this.getMediaUrl(note.cover);
+        
+        // 渲染分享图标
+        if (this.noteShareBtn && window.svgIconShare) {
+            this.noteShareBtn.innerHTML = window.svgIconShare;
+        }
+        
+        // 渲染媒体内容
+        this.noteMediaWrapper.innerHTML = '';
+        this.noteMediaDots.innerHTML = '';
+        const mediaUrls = (note.images && note.images.length > 0) ? 
+                         note.images.map(img => img.url) : 
+                         (note.videos && note.videos.length > 0 ? note.videos.map(v => v.url) : []);
+        
+        this.noteMediaList = mediaUrls;
+        this.noteMediaIndex = 0;
+
+        mediaUrls.forEach((url, i) => {
+            const item = document.createElement('div');
+            item.className = 'note-media-item';
+            item.innerHTML = `<img src="${this.getMediaUrl(url)}" loading="lazy">`;
+            this.noteMediaWrapper.appendChild(item);
+
+            const dot = document.createElement('div');
+            dot.className = `media-dot ${i === 0 ? 'active' : ''}`;
+            this.noteMediaDots.appendChild(dot);
+        });
+
+        this.updateNoteMediaUI();
+
+        // 渲染文本内容
+        this.noteDetailTitle.textContent = note.title || '无标题';
+        this.noteDetailDesc.textContent = note.desc || '';
+        
+        // 渲染标签
+        this.noteDetailTags.innerHTML = '';
+        if (note.tags) {
+            const tags = note.tags.split(/[#\s]+/).filter(t => t.trim());
+            tags.forEach(tag => {
+                const span = document.createElement('span');
+                span.className = 'note-tag';
+                span.textContent = `#${tag}`;
+                this.noteDetailTags.appendChild(span);
+            });
+        }
+
+        this.noteDetailTime.textContent = note.time ? note.time.split(' ')[0] : '-';
+        this.noteLikeCount.textContent = this.formatNum(note.likeCount);
+        this.noteCollectCount.textContent = this.formatNum(note.collectCount);
+        this.noteCommentCount.textContent = this.formatNum(note.commentCount);
+    }
+
+    closeNoteDetail() {
+        this.noteDetailViewer.style.display = 'none';
+        document.body.style.overflow = '';
+    }
+
+    prevNoteMedia() {
+        if (this.noteMediaIndex > 0) {
+            this.noteMediaIndex--;
+            this.updateNoteMediaUI();
+        }
+    }
+
+    nextNoteMedia() {
+        if (this.noteMediaIndex < this.noteMediaList.length - 1) {
+            this.noteMediaIndex++;
+            this.updateNoteMediaUI();
+        }
+    }
+
+    updateNoteMediaUI() {
+        const offset = -this.noteMediaIndex * 100;
+        this.noteMediaWrapper.style.transform = `translateX(${offset}%)`;
+        this.noteMediaCounter.textContent = `${this.noteMediaIndex + 1}/${this.noteMediaList.length}`;
+        
+        const dots = this.noteMediaDots.querySelectorAll('.media-dot');
+        dots.forEach((dot, i) => {
+            dot.classList.toggle('active', i === this.noteMediaIndex);
+        });
+    }
+
     toggleTheme() {
         const isDark = document.body.getAttribute('data-theme') === 'dark';
         const newTheme = isDark ? 'light' : 'dark';
@@ -287,8 +468,13 @@ class XHSWebUI {
         this.showLoading();
 
         try {
-            const cookie = this.cookieInput.value.trim();
-            const apiUrl = `/web/api/note?url=${encodeURIComponent(url)}&cookie=${encodeURIComponent(cookie)}&refresh=${refresh}`;
+            const settings = JSON.parse(localStorage.getItem('xhs_settings') || '{}');
+            const cookie = settings.cookie || '';
+            const imageFormat = settings.imageFormat || 'webp';
+            const videoPref = settings.videoPref || 'resolution';
+            const proxy = settings.proxy || '';
+            
+            const apiUrl = `/web/api/note?url=${encodeURIComponent(url)}&cookie=${encodeURIComponent(cookie)}&refresh=${refresh}&image_format=${imageFormat}&video_preference=${videoPref}&proxy=${encodeURIComponent(proxy)}`;
             const resp = await fetch(apiUrl);
             if (!resp.ok) throw new Error(await resp.text());
             
@@ -622,17 +808,76 @@ class XHSWebUI {
                         }
                     };
 
-                    card.onclick = () => {
-                        this.currentNote = note;
-                        if (note.url) {
-                            this.urlInput.value = note.url;
-                            this.refreshBtn.style.display = 'flex';
-                        }
-                        this.switchPage('extract-page');
-                        this.displayResult(note);
-                        this.updateStarBtn(item.is_starred);
-                    };
                     wrapper.appendChild(card);
+
+                    // 交互逻辑：短按详情，长按(0.5s)提取，增加滑动误触判断
+                    let pressTimer = null;
+                    let isLongPress = false;
+                    let startX, startY;
+                    let isMoving = false;
+
+                    const startPress = (e) => {
+                        const touch = e.touches ? e.touches[0] : e;
+                        startX = touch.clientX;
+                        startY = touch.clientY;
+                        isMoving = false;
+                        isLongPress = false;
+                        
+                        card.classList.add('charging');
+                        pressTimer = setTimeout(() => {
+                            if (!isMoving) {
+                                isLongPress = true;
+                                // 触发提取逻辑
+                                this.currentNote = note;
+                                if (note.url) {
+                                    this.urlInput.value = note.url;
+                                    this.refreshBtn.style.display = 'flex';
+                                }
+                                this.switchPage('extract-page');
+                                this.displayResult(note);
+                                this.updateStarBtn(item.is_starred);
+                                card.classList.remove('charging');
+                            }
+                        }, 500);
+                    };
+
+                    const movePress = (e) => {
+                        const touch = e.touches ? e.touches[0] : e;
+                        const deltaX = Math.abs(touch.clientX - startX);
+                        const deltaY = Math.abs(touch.clientY - startY);
+                        
+                        // 如果位移超过 10px，判定为滑动，取消点击/长按逻辑
+                        if (deltaX > 10 || deltaY > 10) {
+                            isMoving = true;
+                            clearTimeout(pressTimer);
+                            card.classList.remove('charging');
+                        }
+                    };
+
+                    const cancelPress = () => {
+                        clearTimeout(pressTimer);
+                        card.classList.remove('charging');
+                    };
+
+                    const endPress = (e) => {
+                        clearTimeout(pressTimer);
+                        card.classList.remove('charging');
+                        if (!isLongPress && !isMoving) {
+                            // 既不是长按也不是滑动，才是短按详情
+                            this.openNoteDetail(note);
+                        }
+                    };
+
+                    // 适配鼠标和触摸
+                    card.addEventListener('mousedown', startPress);
+                    card.addEventListener('mousemove', movePress);
+                    card.addEventListener('mouseup', endPress);
+                    card.addEventListener('mouseleave', cancelPress);
+
+                    card.addEventListener('touchstart', startPress, { passive: true });
+                    card.addEventListener('touchmove', movePress, { passive: true });
+                    card.addEventListener('touchend', endPress, { passive: true });
+                    card.addEventListener('touchcancel', cancelPress, { passive: true });
                 });
 
                 viewport.appendChild(wrapper);
@@ -710,10 +955,22 @@ class XHSWebUI {
         this.errorMsg.textContent = msg;
     }
 
-    hideAll() {
-        this.loading.style.display = 'none';
+    showLoading() {
+        if (this.loading) {
+            // 确保每次显示前都有波浪 HTML（防止被意外清空）
+            if (this.loading.innerHTML.trim() === '' && window.generateLoadingWave) {
+                this.loading.innerHTML = window.generateLoadingWave();
+            }
+            this.loading.style.display = 'flex';
+        }
         this.result.style.display = 'none';
         this.error.style.display = 'none';
+    }
+
+    hideAll() {
+        if (this.loading) this.loading.style.display = 'none';
+        if (this.result) this.result.style.display = 'none';
+        if (this.error) this.error.style.display = 'none';
     }
 
     formatNum(n) {
@@ -732,6 +989,49 @@ class XHSWebUI {
             if (timer) clearTimeout(timer);
             timer = setTimeout(() => fn.apply(this, arguments), delay);
         };
+    }
+
+    // 剪贴板检测核心逻辑
+    async checkClipboard() {
+        try {
+            // 如果不在提取页面，不执行自动填装
+            const extractPage = document.getElementById('extract-page');
+            if (!extractPage.classList.contains('active')) return;
+
+            // 部分浏览器可能需要用户交互后才能读取，这里尝试静默读取
+            const text = await navigator.clipboard.readText();
+            if (!text || text === this.lastClipboardContent) return;
+
+            // 检测是否包含小红书链接标识
+            if (text.includes('xiaohongshu.com') || text.includes('xhslink.com')) {
+                this.lastClipboardContent = text;
+                await this.autoTypeEffect(text);
+            }
+        } catch (err) {
+            // 权限受限或不支持剪贴板 API，静默失败
+            console.log('剪贴板访问受限:', err);
+        }
+    }
+
+    // 打字机式删除与输入动画
+    async autoTypeEffect(newContent) {
+        const input = this.urlInput;
+        const speed = 10; // 动画速度（毫秒/字符）
+
+        // 第一步：逐字删除现有内容
+        while (input.value.length > 0) {
+            input.value = input.value.slice(0, -1);
+            await new Promise(resolve => setTimeout(resolve, speed / 2));
+        }
+
+        // 第二步：逐字输入新内容
+        for (let i = 0; i < newContent.length; i++) {
+            input.value += newContent[i];
+            await new Promise(resolve => setTimeout(resolve, speed));
+        }
+
+        // 第三步：自动触发查询
+        await this.fetchNote();
     }
 }
 

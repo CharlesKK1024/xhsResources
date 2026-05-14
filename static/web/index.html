@@ -1,234 +1,341 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <meta name="referrer" content="no-referrer">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <meta name="referrer" content="no-referrer" />
     <title>XHS-Downloader Web</title>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📕</text></svg>">
-    <link rel="stylesheet" href="/web/static/style.css">
-</head>
-<body>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📕</text></svg>"
+    />
+    <link rel="stylesheet" href="/web/static/style.css" />
+  </head>
+  <body>
     <div class="app-container">
-        <aside class="sidebar">
-            <div class="logo">
-                <span class="logo-icon">📕</span>
-                <h1 class="logo-text">XHS-Downloader</h1>
-            </div>
-            <nav class="nav-menu">
-                <button class="nav-item active" data-target="extract-page">
-                    <span class="nav-icon">🔍</span> 提取作品
-                </button>
-                <button class="nav-item" data-target="history-page">
-                    <span class="nav-icon">🕒</span> 作品集
-                </button>
-                <button class="nav-item" data-target="collection-page">
-                    <span class="nav-icon">⭐</span> 个人收藏
-                </button>
-            </nav>
-        </aside>
-
-        <!-- 顶部操作栏 (深色模式/设置) -->
-        <div class="top-header-actions">
-            <div id="cardScaler" class="scaler-popup" style="display:none;">
-                <span class="scaler-label">卡片缩放</span>
-                <input type="range" id="scaleRange" min="-80" max="150" value="0">
-                <span id="scaleValue" class="scale-value">100%</span>
-            </div>
-            <button id="scaleBtn" class="action-btn" title="调整卡片大小" style="display:none;">🔍</button>
-            <button id="themeToggle" class="action-btn" title="切换深色/浅色模式">🌙</button>
-            <button id="settingsBtn" class="action-btn" title="设置">⚙️</button>
+      <aside class="sidebar">
+        <div class="logo">
+          <span class="logo-icon">📕</span>
+          <h1 class="logo-text">XHS-Downloader</h1>
         </div>
+        <nav class="nav-menu">
+          <button class="nav-item active" data-target="extract-page">
+            <span class="nav-icon">🔍</span> 提取作品
+          </button>
+          <button class="nav-item" data-target="history-page">
+            <span class="nav-icon">🕒</span> 作品集
+          </button>
+          <button class="nav-item" data-target="collection-page">
+            <span class="nav-icon">⭐</span> 个人收藏
+          </button>
+        </nav>
+      </aside>
 
-        <main class="main-content">
-            <!-- 提取页面 -->
-            <section id="extract-page" class="page active">
-                <header class="page-header">
-                    <h2>提取作品</h2>
-                    <p class="subtitle">小红书作品在线提取工具</p>
-                </header>
-                
-                <div class="input-section">
-                    <div class="input-group">
-                        <input type="text" id="urlInput" placeholder="粘贴小红书作品链接..." class="url-input">
-                        <input type="text" id="cookieInput" placeholder="Cookie（可选，登录后获取）" class="cookie-input">
-                    </div>
-                    <div class="button-group">
-                        <button id="clearBtn" class="clear-btn">
-                            <span class="btn-icon">🧹</span> 一键清空
-                        </button>
-                        <button id="fetchBtn" class="fetch-btn">
-                            <span class="btn-icon">🚀</span> 获取信息
-                        </button>
-                    </div>
-                    <button id="refreshBtn" class="refresh-btn" title="强制刷新（重新向小红书请求数据）" style="display:none;">
-                        <span class="btn-icon">🔄</span>
-                    </button>
-                </div>
-
-                <div id="loading" class="loading" style="display:none;">
-                    <div class="spinner"></div>
-                    <p>正在获取并缓存作品信息...</p>
-                </div>
-
-                <div id="result" class="result" style="display:none;">
-                    <div class="result-header">
-                        <h2>作品预览</h2>
-                        <div class="result-actions">
-                            <button id="starBtn" class="star-btn" title="加入收藏">⭐ 收藏</button>
-                            <button id="copyBtn" class="copy-btn">📋 复制链接</button>
-                        </div>
-                    </div>
-
-                    <div class="note-card">
-                        <div class="cover">
-                            <img id="coverImg" src="" alt="封面" referrerpolicy="no-referrer">
-                        </div>
-                        <div class="info">
-                            <h3 id="title"></h3>
-                            <div class="author-info">
-                                <span class="author">👤 <span id="author"></span></span>
-                                <span class="time">📅 <span id="publishTime"></span></span>
-                            </div>
-                            <p id="desc"></p>
-                            <div class="meta">
-                                <span>❤️ <span id="likeCount">0</span></span>
-                                <span>⭐ <span id="collectCount">0</span></span>
-                                <span>💬 <span id="commentCount">0</span></span>
-                            </div>
-                            <div id="tags" class="tag-container"></div>
-                        </div>
-                    </div>
-
-                    <div class="preview-section">
-                        <div class="section-header">
-                            <div class="section-title-group">
-                                <h3>🖼️ 内容预览</h3>
-                                <button id="editModeBtn" class="edit-mode-btn">✏️ 编辑模式</button>
-                            </div>
-                            <button id="downloadAllBtn" class="download-all-btn" style="display:none;">全部下载</button>
-                        </div>
-                        <div id="previewList" class="preview-list"></div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- 作品集页面 -->
-            <section id="history-page" class="page">
-                <header class="page-header">
-                    <h2>作品集</h2>
-                    <div class="header-actions">
-                        <div class="search-box">
-                            <input type="text" id="historySearch" placeholder="搜索标题、作者、标签...">
-                        </div>
-                        <select id="historySort" class="sort-select">
-                            <option value="time_desc">获取时间 (新→旧)</option>
-                            <option value="time_asc">获取时间 (旧→新)</option>
-                            <option value="author">按作者分组</option>
-                        </select>
-                    </div>
-                </header>
-                <div id="historyList" class="data-list">
-                    <!-- 动态生成 -->
-                </div>
-            </section>
-
-            <!-- 收藏夹页面 -->
-            <section id="collection-page" class="page">
-                <header class="page-header">
-                    <h2>个人收藏</h2>
-                    <div class="header-actions">
-                        <div class="search-box">
-                            <input type="text" id="collectionSearch" placeholder="搜索收藏...">
-                        </div>
-                        <button id="exportBtn" class="export-btn">📤 导出收藏</button>
-                    </div>
-                </header>
-                <div class="collection-filters">
-                    <button class="filter-btn active" data-tag="all">全部</button>
-                    <!-- 动态生成标签过滤器 -->
-                </div>
-                <div id="collectionList" class="data-list">
-                    <!-- 动态生成 -->
-                </div>
-            </section>
-
-            <div id="error" class="error" style="display:none;">
-                <div class="error-icon">⚠️</div>
-                <p id="errorMsg"></p>
-            </div>
-        </main>
-
-        <div id="settingsPanel" class="settings-panel" style="display:none;">
-            <div class="settings-content">
-                <div class="settings-header">
-                    <h3>设置</h3>
-                    <button id="closeSettings" class="close-btn">✕</button>
-                </div>
-                <div class="settings-body">
-                    <div class="setting-item">
-                        <label>下载目录</label>
-                        <input type="text" id="settingPath" placeholder="默认: Volume/Download">
-                    </div>
-                    <div class="setting-item">
-                        <label>图片格式</label>
-                        <select id="settingImageFormat">
-                            <option value="auto">自动</option>
-                            <option value="jpeg">JPEG</option>
-                            <option value="png">PNG</option>
-                            <option value="webp">WebP</option>
-                        </select>
-                    </div>
-                    <div class="setting-item">
-                        <label>视频偏好</label>
-                        <select id="settingVideoPref">
-                            <option value="resolution">画质优先</option>
-                            <option value="bitrate">码率优先</option>
-                            <option value="size">大小优先</option>
-                        </select>
-                    </div>
-                    <div class="setting-item">
-                        <label>代理</label>
-                        <input type="text" id="settingProxy" placeholder="HTTP 代理地址（可选）">
-                    </div>
-                    <button id="saveSettings" class="save-btn">保存设置</button>
-                </div>
-            </div>
+      <!-- 顶部操作栏 (深色模式/设置) -->
+      <div class="top-header-actions">
+        <div id="cardScaler" class="scaler-popup" style="display: none">
+          <span class="scaler-label">卡片缩放</span>
+          <input type="range" id="scaleRange" min="-80" max="150" value="0" />
+          <span id="scaleValue" class="scale-value">100%</span>
         </div>
+        <button
+          id="scaleBtn"
+          class="action-btn"
+          title="调整卡片大小"
+          style="display: none"
+        >
+          🔍
+        </button>
+        <button id="themeToggle" class="action-btn" title="切换深色/浅色模式">
+          🌙
+        </button>
+        <button id="settingsBtn" class="action-btn" title="设置">⚙️</button>
+      </div>
 
-        <footer class="footer">
-            <p>XHS-Downloader Web Interface</p>
-            <p class="tips">提示：部分作品需要登录 Cookie 才能查看完整内容</p>
-        </footer>
+      <main class="main-content">
+        <!-- 提取页面 -->
+        <section id="extract-page" class="page active">
+          <header class="page-header">
+            <h2>提取作品</h2>
+            <p class="subtitle">小红书作品在线提取工具</p>
+          </header>
+
+          <div class="input-section">
+            <div class="input-group">
+              <input
+                type="text"
+                id="urlInput"
+                placeholder="粘贴小红书作品链接..."
+                class="url-input"
+              />
+            </div>
+            <div class="button-group">
+              <button id="clearBtn" class="clear-btn">
+                <span class="btn-icon">🧹</span> 一键清空
+              </button>
+              <button id="fetchBtn" class="fetch-btn">
+                <span class="btn-icon">🚀</span> 获取信息
+              </button>
+            </div>
+            <button
+              id="refreshBtn"
+              class="refresh-btn"
+              title="强制刷新（重新向小红书请求数据）"
+              style="display: none"
+            >
+              <span class="btn-icon">🔄</span>
+            </button>
+          </div>
+
+          <div id="loading" class="loading" style="display: none">
+            <!-- 由 tools.js 动态生成 -->
+          </div>
+
+          <div id="result" class="result" style="display: none">
+            <div class="result-header">
+              <h2>作品预览</h2>
+              <div class="result-actions">
+                <button id="starBtn" class="star-btn" title="加入收藏">
+                  ⭐ 收藏
+                </button>
+                <button id="copyBtn" class="copy-btn">📋 复制链接</button>
+              </div>
+            </div>
+
+            <div class="note-card">
+              <div class="cover">
+                <img
+                  id="coverImg"
+                  src=""
+                  alt="封面"
+                  referrerpolicy="no-referrer"
+                />
+              </div>
+              <div class="info">
+                <h3 id="title"></h3>
+                <div class="author-info">
+                  <span class="author">👤 <span id="author"></span></span>
+                  <span class="time">📅 <span id="publishTime"></span></span>
+                </div>
+                <p id="desc"></p>
+                <div class="meta">
+                  <span>❤️ <span id="likeCount">0</span></span>
+                  <span>⭐ <span id="collectCount">0</span></span>
+                  <span>💬 <span id="commentCount">0</span></span>
+                </div>
+                <div id="tags" class="tag-container"></div>
+              </div>
+            </div>
+
+            <div class="preview-section">
+              <div class="section-header">
+                <div class="section-title-group">
+                  <h3>🖼️ 内容预览</h3>
+                  <button id="editModeBtn" class="edit-mode-btn">
+                    ✏️ 编辑模式
+                  </button>
+                </div>
+                <button
+                  id="downloadAllBtn"
+                  class="download-all-btn"
+                  style="display: none"
+                >
+                  全部下载
+                </button>
+              </div>
+              <div id="previewList" class="preview-list"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 作品集页面 -->
+        <section id="history-page" class="page">
+          <header class="page-header">
+            <h2>作品集</h2>
+            <div class="header-actions">
+              <div class="search-box">
+                <input
+                  type="text"
+                  id="historySearch"
+                  placeholder="搜索标题、作者、标签..."
+                />
+              </div>
+              <select id="historySort" class="sort-select">
+                <option value="time_desc">获取时间 (新→旧)</option>
+                <option value="time_asc">获取时间 (旧→新)</option>
+                <option value="author">按作者分组</option>
+              </select>
+            </div>
+          </header>
+          <div id="historyList" class="data-list">
+            <!-- 动态生成 -->
+          </div>
+        </section>
+
+        <!-- 收藏夹页面 -->
+        <section id="collection-page" class="page">
+          <header class="page-header">
+            <h2>个人收藏</h2>
+            <div class="header-actions">
+              <div class="search-box">
+                <input
+                  type="text"
+                  id="collectionSearch"
+                  placeholder="搜索收藏..."
+                />
+              </div>
+              <button id="exportBtn" class="export-btn">📤 导出收藏</button>
+            </div>
+          </header>
+          <div class="collection-filters">
+            <button class="filter-btn active" data-tag="all">全部</button>
+            <!-- 动态生成标签过滤器 -->
+          </div>
+          <div id="collectionList" class="data-list">
+            <!-- 动态生成 -->
+          </div>
+        </section>
+
+        <div id="error" class="error" style="display: none">
+          <div class="error-icon">⚠️</div>
+          <p id="errorMsg"></p>
+        </div>
+      </main>
+
+      <div id="settingsPanel" class="settings-panel" style="display: none">
+        <div class="settings-content">
+          <div class="settings-header">
+            <h3>设置</h3>
+            <button id="closeSettings" class="close-btn">✕</button>
+          </div>
+          <div class="settings-body">
+            <div class="setting-item">
+              <label>下载目录</label>
+              <input
+                type="text"
+                id="settingPath"
+                placeholder="默认: Volume/Download"
+              />
+            </div>
+            <div class="setting-item">
+              <label>图片格式</label>
+              <select id="settingImageFormat">
+                <option value="webp" selected>WebP (推荐)</option>
+                <option value="jpeg">JPEG</option>
+                <option value="png">PNG</option>
+                <option value="auto">自动</option>
+              </select>
+            </div>
+            <div class="setting-item">
+              <label>视频偏好</label>
+              <select id="settingVideoPref">
+                <option value="resolution">画质优先</option>
+                <option value="bitrate">码率优先</option>
+                <option value="size">大小优先</option>
+              </select>
+            </div>
+            <div class="setting-item">
+              <label>代理</label>
+              <input
+                type="text"
+                id="settingProxy"
+                placeholder="HTTP 代理地址（可选）"
+              />
+            </div>
+            <div class="setting-item">
+              <label>小红书 Cookie</label>
+              <textarea
+                id="settingCookie"
+                placeholder="粘贴小红书 Cookie... (用于获取完整内容)"
+                rows="3"
+                style="width: 100%; padding: 1vh; border-radius: 1vh; border: 1px solid var(--border-color); background: var(--input-bg); color: var(--text-main); font-size: 1.4vh; resize: vertical;"
+              ></textarea>
+            </div>
+            <button id="saveSettings" class="save-btn">保存设置</button>
+          </div>
+        </div>
+      </div>
+
+      <footer class="footer">
+        <p>XHS-Downloader Web Interface</p>
+        <p class="tips">提示：部分作品需要登录 Cookie 才能查看完整内容</p>
+      </footer>
     </div>
 
     <!-- 瀑布流查看器 (全屏平铺预览) -->
-    <div id="waterfallViewer" class="waterfall-viewer" style="display:none;">
-        <div class="waterfall-header">
-            <div class="waterfall-title-group">
-                <span class="waterfall-author-icon">👤</span>
-                <h3 id="waterfallTitle">作者作品集</h3>
-            </div>
-            <button class="waterfall-close">✕</button>
+    <div id="waterfallViewer" class="waterfall-viewer" style="display: none">
+      <div class="waterfall-header">
+        <div class="waterfall-title-group">
+          <span class="waterfall-author-icon">👤</span>
+          <h3 id="waterfallTitle">作者作品集</h3>
         </div>
-        <div id="waterfallContent" class="waterfall-content">
-            <!-- 动态生成瀑布流图片 -->
-        </div>
+        <button class="waterfall-close">✕</button>
+      </div>
+      <div id="waterfallContent" class="waterfall-content">
+        <!-- 动态生成瀑布流图片 -->
+      </div>
     </div>
 
     <!-- 全景查看器 (沉浸式大图预览) -->
-    <div id="fullViewer" class="full-viewer" style="display:none;">
-        <div class="viewer-overlay"></div>
-        <div class="viewer-content">
-            <img id="viewerImg" src="" alt="预览图">
-            <div id="viewerCounter" class="viewer-counter">1 / 1</div>
+    <div id="fullViewer" class="full-viewer" style="display: none">
+      <div class="viewer-overlay"></div>
+      <div class="viewer-content">
+        <img id="viewerImg" src="" alt="预览图" />
+        <div id="viewerCounter" class="viewer-counter">1 / 1</div>
+      </div>
+      <button class="viewer-close">✕</button>
+      <button class="viewer-nav prev">‹</button>
+      <button class="viewer-nav next">›</button>
+    </div>
+
+    <!-- 笔记详情弹窗 (仿小红书原生界面) -->
+    <div id="noteDetailViewer" class="note-detail-viewer" style="display: none">
+      <div class="note-detail-header">
+        <div class="note-detail-author">
+          <button class="note-detail-back">✕</button>
+          <img id="noteAvatar" src="" class="note-avatar" />
+          <span id="noteAuthorName" class="note-author-name"></span>
         </div>
-        <button class="viewer-close">✕</button>
-        <button class="viewer-nav prev">‹</button>
-        <button class="viewer-nav next">›</button>
+        <div class="note-detail-actions">
+          <button class="note-follow-btn">关注</button>
+          <button id="noteShareBtn" class="note-share-btn"></button>
+        </div>
+      </div>
+      <div class="note-detail-content">
+        <div class="note-media-container">
+          <div id="noteMediaWrapper" class="note-media-wrapper">
+            <!-- 动态生成图片/视频 -->
+          </div>
+          <div id="noteMediaCounter" class="note-media-counter">1/1</div>
+          <div id="noteMediaDots" class="note-media-dots"></div>
+        </div>
+        <div class="note-text-content">
+          <h2 id="noteDetailTitle" class="note-title"></h2>
+          <p id="noteDetailDesc" class="note-desc"></p>
+          <div id="noteDetailTags" class="note-tags"></div>
+          <div id="noteDetailTime" class="note-time"></div>
+        </div>
+      </div>
+      <div class="note-detail-footer">
+        <div class="note-footer-input">说点什么...</div>
+        <div class="note-footer-actions">
+          <span class="footer-action">❤️ <span id="noteLikeCount"></span></span>
+          <span class="footer-action"
+            >⭐ <span id="noteCollectCount"></span
+          ></span>
+          <span class="footer-action"
+            >💬 <span id="noteCommentCount"></span
+          ></span>
+        </div>
+      </div>
     </div>
 
     <script src="/web/static/utils/swipe.js"></script>
+    <script src="/web/static/utils/svg.js"></script>
+    <script src="/web/static/utils/tools.js"></script>
     <script src="/web/static/script.js"></script>
-</body>
+  </body>
 </html>

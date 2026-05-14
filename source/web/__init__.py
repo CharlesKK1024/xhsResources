@@ -12,7 +12,7 @@ from typing import List, Optional
 warnings.filterwarnings('ignore', message='Unverified HTTPS request')
 
 from ..application import XHS
-from ..module import Settings, logging, ERROR, HEADERS, WebRecorder
+from ..module import Settings, logging, ERROR, HEADERS, WebRecorder, FILE_SIGNATURES
 
 from datetime import datetime
 import hashlib
@@ -56,7 +56,10 @@ async def download_to_cache(url: str, filename: str, note_info: dict = None, rec
 
     # 3. 优化命名规则：作者_时间_标题_哈希.后缀
     def clean_name(name):
-        return re.sub(r'[\\/:*?"<>|]', '_', str(name))
+        # 移除非法字符，并将空格替换为下划线，确保 URL 兼容性
+        name = str(name).strip()
+        name = re.sub(r'[\\/:*?"<>| ]', '_', name)
+        return name
     
     today_dir = get_today_cache_dir()
     today_str = datetime.now().strftime("%Y%m%d")
@@ -65,14 +68,16 @@ async def download_to_cache(url: str, filename: str, note_info: dict = None, rec
         author = clean_name(note_info.get('author', '未知作者'))
         time_str = clean_name(note_info.get('time', '未知时间'))
         title = clean_name(note_info.get('title', '无标题'))[:20]
+        # 去掉可能导致编码问题的非 ASCII 字符，仅保留语义部分（可选，但为了安全建议保留）
+        # 这里我们保持原样，但确保 re.sub 已经处理了非法字符
         url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
         
-        ext = filename.split('.')[-1]
+        ext = filename.split('.')[-1] if '.' in filename else 'png'
         suffix = "_cover" if "_cover" in filename else ""
         filename = f"{author}_{time_str}_{title}{suffix}_{url_hash}.{ext}"
     else:
         url_hash = hashlib.md5(url.encode()).hexdigest()
-        ext = filename.split('.')[-1]
+        ext = filename.split('.')[-1] if '.' in filename else 'jpg'
         filename = f"proxy_{url_hash}.{ext}"
 
     file_path = today_dir / filename
@@ -85,13 +90,34 @@ async def download_to_cache(url: str, filename: str, note_info: dict = None, rec
     
     try:
         headers = HEADERS.copy()
+        # 强制增加 referer，防止小红书 403
+        headers["referer"] = "https://www.xiaohongshu.com/"
         if filename.endswith(('.png', '.jpg', '.jpeg', '.webp')):
              headers["accept"] = "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
         
         response = requests.get(url, headers=headers, verify=False, timeout=30)
         if response.status_code == 200:
+            content = response.content
+            
+            # 根据二进制签名校验真实后缀
+            real_ext = None
+            for offset, signature, ext_name in FILE_SIGNATURES:
+                if content[offset:offset+len(signature)] == signature:
+                    real_ext = ext_name
+                    break
+            
+            # 如果真实后缀和预期不符（特别是 HEIC），修正文件名
+            if real_ext and not file_path.name.endswith(f".{real_ext}"):
+                # 如果是 HEIC 但我们要的是 PNG/JPG，说明 auto 模式导致了不兼容
+                if real_ext == "heic":
+                    logging(None, f"检测到 HEIC 格式: {url}，建议在设置中切换为 WebP/JPEG 以兼容电脑端", 30) # WARNING level
+                
+                filename = filename.rsplit('.', 1)[0] + f".{real_ext}"
+                file_path = today_dir / filename
+                relative_path = f"{today_str}/{filename}"
+
             async with aiofiles.open(file_path, mode='wb') as f:
-                await f.write(response.content)
+                await f.write(content)
             
             if recorder:
                 await recorder.add_url_cache(url, relative_path)
@@ -130,16 +156,17 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
     
     # 2. 挂载静态服务（/web/cache 对应硬盘上的 Cache 文件夹）
-    app.mount("/web/cache", StaticFiles(directory=str(CACHE_DIR)), name="cache")
+    # 增加 html=True 和 follow_symlinks=True 以增强兼容性
+    app.mount("/web/cache", StaticFiles(directory=str(CACHE_DIR.absolute())), name="cache")
 
     @app.get("/web/")
     @app.get("/web/index.html")
     async def index():
         return FileResponse(str(STATIC_DIR / "index.html"))
 
-    @app.get("/web/static/{filename}")
-    async def static_files(filename: str):
-        file_path = STATIC_DIR / filename
+    @app.get("/web/static/{path:path}")
+    async def static_files(path: str):
+        file_path = STATIC_DIR / path
         if file_path.exists():
             return FileResponse(str(file_path))
         return JSONResponse({"error": "File not found"}, status_code=404)
@@ -149,7 +176,7 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
         url: str = Query(..., description="小红书作品链接"),
         cookie: str = Query("", description="Cookie"),
         proxy: str = Query("", description="代理地址"),
-        image_format: str = Query("auto", description="图片格式"),
+        image_format: str = Query("webp", description="图片格式"),
         video_preference: str = Query("resolution", description="视频偏好"),
         refresh: bool = Query(False, description="是否强制刷新"),
     ):
@@ -200,10 +227,10 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
                 "author": note.get("作者昵称", ""),
                 "authorId": note.get("作者ID", ""),
                 "type": note.get("作品类型", ""),
-                "likeCount": int(note.get("点赞数量", 0)),
-                "collectCount": int(note.get("收藏数量", 0)),
-                "commentCount": int(note.get("评论数量", 0)),
-                "shareCount": int(note.get("分享数量", 0)),
+                "likeCount": int(note.get("点赞数量") or 0),
+                "collectCount": int(note.get("收藏数量") or 0),
+                "commentCount": int(note.get("评论数量") or 0),
+                "shareCount": int(note.get("分享数量") or 0),
                 "tags": note.get("作品标签", ""),
                 "time": note.get("发布时间", ""),
                 "images": _parse_images(note),
@@ -218,19 +245,25 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
                 cache_url = await download_to_cache(data["cover"], f"{note_id}_cover.{ext}", data, recorder, force_refresh=refresh)
                 data["cover"] = cache_url
 
-            # 预先为作品中的所有媒体建立缓存映射（命名优化）
+            # 预先为作品中的所有媒体建立缓存映射，并更新返回的 URL 为本地路径
             for img in data["images"]:
-                await download_to_cache(img["url"], f"{note_id}_img.png", data, recorder, force_refresh=refresh)
+                cache_url = await download_to_cache(img["url"], f"{note_id}_img.png", data, recorder, force_refresh=refresh)
+                if cache_url.startswith("/web/cache"):
+                    img["url"] = cache_url
+                    
             for vid in data["videos"]:
-                await download_to_cache(vid["url"], f"{note_id}_vid.mp4", data, recorder, force_refresh=refresh)
+                cache_url = await download_to_cache(vid["url"], f"{note_id}_vid.mp4", data, recorder, force_refresh=refresh)
+                if cache_url.startswith("/web/cache"):
+                    vid["url"] = cache_url
 
-            # 保存到历史记录（带上原始 URL 供缓存判断）
+            # 保存到历史记录（此时 data 中的 URL 已经是本地缓存路径了）
             await recorder.add_history(note_id, data, data["authorId"], data["author"], url)
 
             return data
 
         except Exception as e:
-            logging(None, f"Web API 错误: {e}", ERROR)
+            # 修正：直接传入 print 作为 log 回调函数，防止 logging 内部 func = log() 报错
+            logging(lambda: print, f"Web API 错误: {e}", ERROR)
             return JSONResponse({"error": str(e)}, status_code=500)
 
     @app.get("/web/api/history")
@@ -295,53 +328,71 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
     async def proxy_media(url: str = Query(...)):
         try:
             clean_url = url.strip()
+            if not clean_url.startswith('http'):
+                return JSONResponse({"error": "Invalid URL"}, status_code=400)
             
             # 1. 优先从数据库查询缓存路径（支持跨日期查找）
             cached_path = await recorder.get_url_cache(clean_url)
             if cached_path:
                 full_path = CACHE_DIR / cached_path
                 if full_path.exists():
-                    return FileResponse(str(full_path))
+                    # 检查文件大小，如果太小可能是损坏的
+                    if full_path.stat().st_size > 100:
+                        return FileResponse(str(full_path))
+                    else:
+                        os.remove(full_path) # 删除损坏的文件
 
             # 2. 如果数据库没有，则下载并存入“今天”的目录
             today_dir = get_today_cache_dir()
             today_str = datetime.now().strftime("%Y%m%d")
             
-            import hashlib
             url_hash = hashlib.md5(clean_url.encode()).hexdigest()
             cache_name = f"proxy_{url_hash}.jpg"
             file_path = today_dir / cache_name
             relative_path = f"{today_str}/{cache_name}"
             
-            # 再次检查物理文件是否存在
-            if file_path.exists():
-                await recorder.add_url_cache(clean_url, relative_path)
-                return FileResponse(str(file_path))
-
             headers = HEADERS.copy()
+            headers["referer"] = "https://www.xiaohongshu.com/"
             headers["accept"] = "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
             
             resp = requests.get(clean_url, headers=headers, verify=False, timeout=30)
-            resp.raise_for_status()
+            if resp.status_code != 200:
+                return JSONResponse({"error": f"Failed to fetch image: {resp.status_code}"}, status_code=resp.status_code)
             
+            content = resp.content
+            if len(content) < 100:
+                return JSONResponse({"error": "Empty or invalid image content"}, status_code=502)
+
+            # 校验真实后缀并修正 cache_name
+            real_ext = "jpg"
+            for offset, signature, ext_name in FILE_SIGNATURES:
+                if content[offset:offset+len(signature)] == signature:
+                    real_ext = ext_name
+                    break
+            
+            if real_ext != "jpg":
+                cache_name = f"proxy_{url_hash}.{real_ext}"
+                file_path = today_dir / cache_name
+                relative_path = f"{today_str}/{cache_name}"
+
             # 保存到硬盘
             async with aiofiles.open(file_path, mode='wb') as f:
-                await f.write(resp.content)
+                await f.write(content)
             
             # 记录到数据库
             await recorder.add_url_cache(clean_url, relative_path)
             
-            content_type = resp.headers.get("Content-Type", "image/png")
             return Response(
-                content=resp.content,
-                media_type=content_type,
+                content=content,
+                media_type=f"image/{real_ext}",
                 headers={
                     "Cache-Control": "public, max-age=86400",
                     "Access-Control-Allow-Origin": "*",
                 },
             )
         except Exception as e:
-            logging(None, f"代理缓存失败: {e}", ERROR)
+            # 修正：直接传入 print 作为 log 回调函数，防止 logging 内部 func = log() 报错
+            logging(lambda: print, f"代理缓存失败: {e}", ERROR)
             return JSONResponse({"error": str(e)}, status_code=502)
 
     return app
