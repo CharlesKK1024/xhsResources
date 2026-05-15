@@ -285,6 +285,30 @@ body {
     box-shadow: 0 0 0 0.5vh rgba(255, 36, 66, 0.1);
 }
 
+.paste-detect-btn {
+    position: absolute;
+    right: 1vh;
+    top: 50%;
+    transform: translateY(-50%);
+    background: var(--hover-bg);
+    border: 0.2vh solid var(--border-color);
+    border-radius: 1vh;
+    font-size: 2.2vh;
+    padding: 0.6vh 0.8vh;
+    cursor: pointer;
+    line-height: 1;
+    transition: all 0.2s;
+    opacity: 0.7;
+    z-index: 2;
+}
+
+.paste-detect-btn:hover,
+.paste-detect-btn:active {
+    opacity: 1;
+    background: var(--primary-color);
+    border-color: var(--primary-color);
+}
+
 .button-group {
     display: flex;
     gap: 2vw;
@@ -1437,4 +1461,427 @@ body {
 @keyframes wave {
     0%, 100% { height: 10px; }
     50% { height: 70px; }
+}
+
+/* ---- 用户组件样式 ---- */
+
+/* 用户微件——铭牌胶囊 */
+.user-widget {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    padding: 0;
+    border-radius: 10vh;
+    background: linear-gradient(135deg, var(--hover-bg), var(--border-color));
+    transition: all 0.25s ease;
+    flex-shrink: 0;
+    overflow: hidden;
+    box-shadow: 0 0.2vh 0.6vh rgba(0,0,0,0.08);
+    border: 0.1vh solid var(--border-color);
+}
+
+.user-widget:hover {
+    transform: scale(1.03);
+    box-shadow: 0 0.4vh 1vh rgba(0,0,0,0.12);
+    border-color: var(--primary-color);
+}
+
+.user-avatar-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.2vh 0 0.2vh 0.2vh;
+}
+
+.user-avatar {
+    width: 3.2vh;
+    height: 3.2vh;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 0.2vh solid var(--primary-color);
+    background: var(--card-bg);
+    flex-shrink: 0;
+}
+
+.user-nameplate {
+    padding: 0.5vh 1.6vh 0.5vh 0.8vh;
+    display: flex;
+    align-items: center;
+}
+
+.user-nickname {
+    font-size: 1.5vh;
+    font-weight: 700;
+    color: var(--text-main);
+    max-width: 14vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    letter-spacing: 0.05em;
+}
+
+/* 登录弹窗 */
+.login-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 5000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.login-overlay {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(1vh);
+}
+
+.login-box {
+    position: relative;
+    background: var(--card-bg);
+    width: 80%;
+    max-width: 40vh;
+    border-radius: 2.5vh;
+    padding: 4vh 3vh;
+    text-align: center;
+    box-shadow: 0 2vh 5vh rgba(0, 0, 0, 0.4);
+    z-index: 5001;
+    animation: loginFadeIn 0.3s ease;
+}
+
+@keyframes loginFadeIn {
+    from { opacity: 0; transform: scale(0.95); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+.login-icon {
+    font-size: 6vh;
+    margin-bottom: 1.5vh;
+}
+
+.login-title {
+    font-size: 2.2vh;
+    font-weight: 700;
+    margin-bottom: 0.8vh;
+    color: var(--text-main);
+}
+
+.login-desc {
+    font-size: 1.3vh;
+    color: var(--text-muted);
+    margin-bottom: 2.5vh;
+    line-height: 1.6;
+}
+
+.login-avatar-row {
+    margin-bottom: 2vh;
+}
+
+.login-avatar {
+    width: 8vh;
+    height: 8vh;
+    margin: 0 auto;
+    border-radius: 50%;
+    background: var(--hover-bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 4vh;
+    border: 0.3vh dashed var(--border-color);
+}
+
+.login-input {
+    width: 100%;
+    padding: 1.5vh 2vw;
+    border: 0.2vh solid var(--border-color);
+    border-radius: 1.5vh;
+    font-size: 1.6vh;
+    text-align: center;
+    background: var(--input-bg);
+    color: var(--text-main);
+    outline: none;
+    transition: border-color 0.2s;
+    box-sizing: border-box;
+}
+
+.login-input:focus {
+    border-color: var(--primary-color);
+}
+
+.login-btn {
+    width: 100%;
+    margin-top: 2vh;
+    padding: 1.5vh;
+    background: var(--primary-color);
+    color: white;
+    border: none;
+    border-radius: 1.5vh;
+    font-size: 1.8vh;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.login-btn:hover {
+    opacity: 0.9;
+    transform: scale(1.02);
+}
+
+.login-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.login-password-row {
+    position: relative;
+    width: 100%;
+    margin-top: 1.5vh;
+}
+
+.login-password-row .login-input {
+    padding-right: 5vh;
+    margin-top: 0;
+}
+
+.login-pw-toggle {
+    position: absolute;
+    right: 1.2vh;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    font-size: 2vh;
+    cursor: pointer;
+    padding: 0.5vh;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+    line-height: 1;
+}
+
+.login-pw-toggle:hover {
+    opacity: 1;
+}
+
+.login-error {
+    color: #ff4757;
+    font-size: 1.3vh;
+    margin-top: 1.2vh;
+    padding: 0.8vh 1vh;
+    background: rgba(255, 71, 87, 0.1);
+    border-radius: 1vh;
+    line-height: 1.4;
+}
+
+.login-reset-row {
+    margin-top: 1.5vh;
+    text-align: center;
+}
+
+.login-reset-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1.3vh;
+    cursor: pointer;
+    padding: 0.5vh 1vh;
+    transition: color 0.2s;
+    text-decoration: underline;
+    text-underline-offset: 0.3vh;
+}
+
+.login-reset-btn:hover {
+    color: var(--primary-color);
+}
+
+/* 个人设置弹窗 */
+.profile-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 5000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.profile-overlay {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(0.5vh);
+}
+
+.profile-box {
+    position: relative;
+    background: var(--card-bg);
+    width: 80%;
+    max-width: 40vh;
+    border-radius: 2.5vh;
+    overflow: hidden;
+    box-shadow: 0 2vh 5vh rgba(0, 0, 0, 0.3);
+    z-index: 5001;
+    animation: loginFadeIn 0.3s ease;
+}
+
+.profile-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 2vh 2.5vh;
+    border-bottom: 0.1vh solid var(--border-color);
+}
+
+.profile-header h3 {
+    font-size: 2vh;
+    font-weight: 700;
+}
+
+.profile-close {
+    background: none;
+    border: none;
+    font-size: 2.5vh;
+    color: var(--text-muted);
+    cursor: pointer;
+    width: 4vh;
+    height: 4vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+}
+
+.profile-close:hover {
+    background: var(--hover-bg);
+}
+
+.profile-body {
+    padding: 2.5vh;
+}
+
+.profile-avatar-section {
+    text-align: center;
+    margin-bottom: 2.5vh;
+}
+
+.profile-avatar {
+    width: 8vh;
+    height: 8vh;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 0.3vh solid var(--border-color);
+    margin-bottom: 1vh;
+}
+
+.profile-avatar-btn {
+    display: block;
+    margin: 0 auto;
+    background: var(--hover-bg);
+    color: var(--primary-color);
+    border: none;
+    padding: 0.8vh 2vw;
+    border-radius: 1.5vh;
+    font-size: 1.3vh;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.profile-avatar-btn:hover {
+    background: var(--border-color);
+}
+
+.profile-field {
+    margin-bottom: 2vh;
+}
+
+.profile-field label {
+    display: block;
+    font-size: 1.3vh;
+    color: var(--text-muted);
+    margin-bottom: 0.6vh;
+}
+
+.profile-input {
+    width: 100%;
+    padding: 1.2vh 2vw;
+    border: 0.2vh solid var(--border-color);
+    border-radius: 1.2vh;
+    font-size: 1.5vh;
+    background: var(--input-bg);
+    color: var(--text-main);
+    outline: none;
+    transition: border-color 0.2s;
+    box-sizing: border-box;
+}
+
+.profile-input:focus {
+    border-color: var(--primary-color);
+}
+
+.profile-theme-row {
+    display: flex;
+    gap: 1vw;
+}
+
+.profile-theme-btn {
+    flex: 1;
+    padding: 1vh;
+    border: 0.2vh solid var(--border-color);
+    border-radius: 1.2vh;
+    background: var(--input-bg);
+    color: var(--text-muted);
+    font-size: 1.4vh;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.profile-theme-btn.active {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+    background: var(--hover-bg);
+}
+
+.profile-save-btn {
+    width: 100%;
+    margin-top: 1.5vh;
+    padding: 1.5vh;
+    background: var(--primary-color);
+    color: white;
+    border: none;
+    border-radius: 1.2vh;
+    font-size: 1.8vh;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.profile-save-btn:hover {
+    opacity: 0.9;
+}
+
+.profile-logout-btn {
+    width: 100%;
+    margin-top: 1.5vh;
+    padding: 1.5vh;
+    background: transparent;
+    color: #ff4757;
+    border: 0.2vh solid #ff4757;
+    border-radius: 1.2vh;
+    font-size: 1.8vh;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.profile-logout-btn:hover {
+    background: #ff4757;
+    color: white;
 }

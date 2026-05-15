@@ -1,6 +1,8 @@
 class XHSWebUI {
     constructor() {
         this.currentNote = null;
+        this.token = localStorage.getItem('xhs_token') || '';
+        this.currentUser = null;
         this.init();
     }
 
@@ -48,6 +50,28 @@ class XHSWebUI {
         this.settingVideoPref = document.getElementById('settingVideoPref');
         this.settingProxy = document.getElementById('settingProxy');
         this.settingCookie = document.getElementById('settingCookie');
+
+        // 用户相关元素
+        this.userWidget = document.getElementById('userWidget');
+        this.userAvatar = document.getElementById('userAvatar');
+        this.userNickname = document.getElementById('userNickname');
+        this.loginModal = document.getElementById('loginModal');
+        this.loginNickname = document.getElementById('loginNickname');
+        this.loginPassword = document.getElementById('loginPassword');
+        this.loginPasswordToggle = document.getElementById('loginPasswordToggle');
+        this.loginError = document.getElementById('loginError');
+        this.loginResetBtn = document.getElementById('loginResetBtn');
+        this.loginBtn = document.getElementById('loginBtn');
+        this.profileModal = document.getElementById('profileModal');
+        this.profileAvatar = document.getElementById('profileAvatar');
+        this.profileNickname = document.getElementById('profileNickname');
+        this.profileAvatarBtn = document.getElementById('profileAvatarBtn');
+        this.profileAvatarInput = document.getElementById('profileAvatarInput');
+        this.profileClose = document.getElementById('profileClose');
+        this.profileSave = document.getElementById('profileSave');
+        this.profileLogout = document.getElementById('profileLogout');
+        this.profileThemeDark = document.getElementById('profileThemeDark');
+        this.profileThemeLight = document.getElementById('profileThemeLight');
         
         // 全景查看器元素
         this.fullViewer = document.getElementById('fullViewer');
@@ -87,6 +111,7 @@ class XHSWebUI {
         this.viewerIndex = 0; // 当前图片索引
         this.noteMediaIndex = 0; // 笔记详情媒体索引
         this.lastClipboardContent = ''; // 记录上次处理的剪贴板内容
+        this.userTheme = 'dark';
         
         // 导航元素
         this.navItems = document.querySelectorAll('.nav-item');
@@ -293,18 +318,32 @@ class XHSWebUI {
         
         this.collectionSearch.addEventListener('input', () => this.debounce(() => this.loadCollections(), 500)());
 
-        // 剪贴板监听：当页面获得焦点或从后台切换回前台时检查
-        window.addEventListener('focus', () => this.checkClipboard());
-        document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'visible') this.checkClipboard();
-        });
+        // iOS 剪贴板：Safari 任何 readText() 调用都会弹粘贴确认框
+        // 所以 iOS 上完全不做自动检测，只靠手动按钮触发
+        // 非 iOS 设备保留自动检测
+        if (!this.isIOS()) {
+            window.addEventListener('focus', () => this.checkClipboard());
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') this.checkClipboard();
+            });
+        }
 
-        // iOS 补偿机制：点击页面任何地方时，如果上次检测失败，尝试再次检测
-        document.addEventListener('click', () => {
-            if (this.isIOS() && !this.lastClipboardContent) {
-                this.checkClipboard(true); // true 表示由用户手势触发
+        // 添加一个📋检测剪贴板按钮（iOS 专用手动触发）
+        if (this.isIOS()) {
+            const pasteBtn = document.createElement('button');
+            pasteBtn.className = 'paste-detect-btn';
+            pasteBtn.title = '检测剪贴板中的小红书链接';
+            pasteBtn.innerHTML = '📋';
+            pasteBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.checkClipboard(true);
+            });
+            if (this.urlInput && this.urlInput.parentNode) {
+                const wrapper = this.urlInput.parentNode;
+                wrapper.style.position = 'relative';
+                wrapper.appendChild(pasteBtn);
             }
-        }, { once: false });
+        }
 
         // 设置面板事件
         if (this.settingsBtn) {
@@ -322,10 +361,80 @@ class XHSWebUI {
                 if (e.target === this.settingsPanel) this.settingsPanel.style.display = 'none';
             };
         }
+
+        // 用户相关事件
+        if (this.loginBtn) {
+            this.loginBtn.addEventListener('click', () => this.handleLogin());
+        }
+        if (this.loginNickname) {
+            this.loginNickname.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') this.loginPassword.focus();
+            });
+        }
+        if (this.loginPassword) {
+            this.loginPassword.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') this.handleLogin();
+            });
+        }
+        if (this.loginPasswordToggle) {
+            this.loginPasswordToggle.addEventListener('click', () => {
+                const input = this.loginPassword;
+                const isPassword = input.type === 'password';
+                input.type = isPassword ? 'text' : 'password';
+                this.loginPasswordToggle.textContent = isPassword ? '🙈' : '👁️';
+            });
+        }
+        if (this.loginResetBtn) {
+            this.loginResetBtn.addEventListener('click', () => this.handleResetPassword());
+        }
+        if (this.userWidget) {
+            this.userWidget.addEventListener('click', () => this.showProfile());
+        }
+        if (this.profileClose) {
+            this.profileClose.addEventListener('click', () => this.hideProfile());
+        }
+        if (this.profileModal) {
+            this.profileModal.addEventListener('click', (e) => {
+                if (e.target === this.profileModal) this.hideProfile();
+            });
+        }
+        if (this.profileAvatarBtn) {
+            this.profileAvatarBtn.addEventListener('click', () => {
+                this.profileAvatarInput.click();
+            });
+        }
+        if (this.profileAvatarInput) {
+            this.profileAvatarInput.addEventListener('change', (e) => this.uploadAvatar(e));
+        }
+        if (this.profileSave) {
+            this.profileSave.addEventListener('click', () => this.saveProfile());
+        }
+        if (this.profileLogout) {
+            this.profileLogout.addEventListener('click', () => this.handleLogout());
+        }
+        if (this.profileThemeDark) {
+            this.profileThemeDark.addEventListener('click', () => {
+                this.userTheme = 'dark';
+                this.profileThemeDark.classList.add('active');
+                this.profileThemeLight.classList.remove('active');
+                document.documentElement.setAttribute('data-theme', 'dark');
+                this.themeToggle.textContent = '🌙';
+            });
+        }
+        if (this.profileThemeLight) {
+            this.profileThemeLight.addEventListener('click', () => {
+                this.userTheme = 'light';
+                this.profileThemeLight.classList.add('active');
+                this.profileThemeDark.classList.remove('active');
+                document.documentElement.setAttribute('data-theme', 'light');
+                this.themeToggle.textContent = '☀️';
+            });
+        }
     }
 
     async loadInitialData() {
         this.loadSettings();
+        await this.initUser();
     }
 
     loadSettings() {
@@ -438,7 +547,7 @@ class XHSWebUI {
         allImages.forEach((url, index) => {
             const div = document.createElement('div');
             div.className = 'waterfall-item';
-            div.innerHTML = `<img src="${this.getMediaUrl(url)}" loading="lazy">`;
+            div.innerHTML = `<img src="${this.getMediaUrl(url)}" loading="lazy" referrerpolicy="no-referrer">`;
             div.onclick = () => {
                 this.openViewer(allImages, index);
             };
@@ -569,11 +678,20 @@ class XHSWebUI {
                     }
                 };
 
+                const setPlaybackAudioState = (withSound) => {
+                    livePlayWithSound = withSound;
+                    video.defaultMuted = !withSound;
+                    video.muted = !withSound;
+                    video.volume = withSound ? 1 : 0;
+                    if (withSound) {
+                        video.removeAttribute('muted');
+                    } else {
+                        video.setAttribute('muted', '');
+                    }
+                };
+
                 const tryStartPlayback = async () => {
                     if (!shouldPlayLive) return;
-                    if (video.readyState < 2) return;
-                    video.muted = !livePlayWithSound;
-                    video.volume = livePlayWithSound ? 1 : 0;
                     try {
                         video.currentTime = 0;
                     } catch (e) {
@@ -587,10 +705,15 @@ class XHSWebUI {
                     }
                 };
 
-                const playLiveOnce = (withSound = false) => {
+                const playLiveOnce = (withSound = false, immediate = false) => {
                     shouldPlayLive = true;
-                    livePlayWithSound = withSound;
+                    setPlaybackAudioState(withSound);
                     replayBtn.style.display = 'none';
+                    if (immediate) {
+                        video.load();
+                        tryStartPlayback();
+                        return;
+                    }
                     if (video.readyState < 2) {
                         liveReady = false;
                         video.load();
@@ -631,13 +754,13 @@ class XHSWebUI {
                 // 点击重播按钮重新播放
                 replayBtn.onclick = (e) => {
                     e.stopPropagation();
-                    playLiveOnce(true);
+                    playLiveOnce(true, true);
                 };
 
                 // 长按播放逻辑 (保留并增强)
                 let liveTimer = null;
                 const startLive = () => {
-                    liveTimer = setTimeout(() => playLiveOnce(true), 200);
+                    liveTimer = setTimeout(() => playLiveOnce(true, true), 200);
                 };
                 const stopLive = () => {
                     clearTimeout(liveTimer);
@@ -749,19 +872,26 @@ class XHSWebUI {
         const isDark = document.body.getAttribute('data-theme') === 'dark';
         const newTheme = isDark ? 'light' : 'dark';
         this.setTheme(newTheme);
+        if (this.currentUser && this.token) {
+            this.userTheme = newTheme;
+            fetch('/web/api/user/profile', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: this.token, theme: newTheme }),
+            }).catch(() => {});
+        }
     }
 
     setTheme(theme) {
         document.body.setAttribute('data-theme', theme);
+        document.documentElement.setAttribute('data-theme', theme);
         const icon = theme === 'dark' ? '☀️' : '🌙';
-        const text = theme === 'dark' ? '浅色模式' : '深色模式';
-        this.themeToggle.querySelector('.nav-icon').textContent = icon;
-        this.themeToggle.querySelector('.theme-text').textContent = text;
+        this.themeToggle.textContent = icon;
         localStorage.setItem('xhs_theme', theme);
     }
 
     loadTheme() {
-        const savedTheme = localStorage.getItem('xhs_theme') || 'light';
+        const savedTheme = localStorage.getItem('xhs_theme') || 'dark';
         this.setTheme(savedTheme);
     }
 
@@ -781,7 +911,7 @@ class XHSWebUI {
             const videoPref = settings.videoPref || 'resolution';
             const proxy = settings.proxy || '';
             
-            const apiUrl = `/web/api/note?url=${encodeURIComponent(url)}&cookie=${encodeURIComponent(cookie)}&refresh=${refresh}&image_format=${imageFormat}&video_preference=${videoPref}&proxy=${encodeURIComponent(proxy)}`;
+            const apiUrl = `/web/api/note?url=${encodeURIComponent(url)}&cookie=${encodeURIComponent(cookie)}&refresh=${refresh}&image_format=${imageFormat}&video_preference=${videoPref}&proxy=${encodeURIComponent(proxy)}&token=${encodeURIComponent(this.token)}`;
             const resp = await fetch(apiUrl);
             if (!resp.ok) throw new Error(await resp.text());
             
@@ -1026,7 +1156,7 @@ class XHSWebUI {
         const sort = this.historySort.value;
         
         try {
-            const resp = await fetch(`/web/api/history?search=${encodeURIComponent(search)}&sort=${sort}`);
+            const resp = await fetch(`/web/api/history?search=${encodeURIComponent(search)}&sort=${sort}&token=${encodeURIComponent(this.token)}`);
             const data = await resp.json();
             this.renderDataList(this.historyList, data);
         } catch (e) {
@@ -1037,7 +1167,7 @@ class XHSWebUI {
     async loadCollections() {
         const search = this.collectionSearch.value;
         try {
-            const resp = await fetch(`/web/api/collection?search=${encodeURIComponent(search)}`);
+            const resp = await fetch(`/web/api/collection?search=${encodeURIComponent(search)}&token=${encodeURIComponent(this.token)}`);
             const data = await resp.json();
             this.renderDataList(this.collectionList, data);
         } catch (e) {
@@ -1116,7 +1246,7 @@ class XHSWebUI {
                     card.className = 'list-item';
                     card.innerHTML = `
                         <div class="item-cover">
-                            <img src="${this.getMediaUrl(note.cover)}" loading="lazy">
+                            <img src="${this.getMediaUrl(note.cover)}" loading="lazy" referrerpolicy="no-referrer">
                             <button class="delete-item-btn" title="删除记录">✕</button>
                             ${item.is_starred ? '<div class="item-star-badge">❤️</div>' : ''}
                         </div>
@@ -1230,6 +1360,249 @@ class XHSWebUI {
                 console.error(`渲染作者 ${author} 的作品失败:`, err);
             }
         });
+    }
+
+    // ---- 用户管理 ----
+
+    async initUser() {
+        if (this.token) {
+            try {
+                const resp = await fetch(`/web/api/user/profile?token=${encodeURIComponent(this.token)}`);
+                if (resp.ok) {
+                    const user = await resp.json();
+                    this.currentUser = user;
+                    this.userTheme = user.theme || 'dark';
+                    this.applyUserTheme();
+                    this.showUserWidget(user);
+                    return;
+                }
+            } catch (e) {
+                console.warn('Token 验证失败，重新登录');
+            }
+            localStorage.removeItem('xhs_token');
+            this.token = '';
+        }
+        this.showLogin();
+    }
+
+    showLogin() {
+        if (this.loginModal) {
+            this.loginModal.style.display = 'flex';
+            this.loginNickname.value = '';
+            this.loginPassword.value = '';
+            if (this.loginError) this.loginError.style.display = 'none';
+            this.loginPassword.type = 'password';
+            if (this.loginPasswordToggle) this.loginPasswordToggle.textContent = '👁️';
+            this.loginBtn.textContent = '登录';
+            this.loginBtn.disabled = false;
+            this.loginNickname.focus();
+        }
+    }
+
+    async handleLogin() {
+        const nickname = this.loginNickname.value.trim();
+        const password = this.loginPassword ? this.loginPassword.value.trim() : '';
+
+        if (!nickname) {
+            this.loginNickname.focus();
+            this.loginNickname.style.borderColor = '#ff4757';
+            setTimeout(() => { this.loginNickname.style.borderColor = ''; }, 2000);
+            return;
+        }
+        if (!password) {
+            this.loginPassword.focus();
+            this.loginPassword.style.borderColor = '#ff4757';
+            setTimeout(() => { this.loginPassword.style.borderColor = ''; }, 2000);
+            return;
+        }
+
+        this.loginBtn.textContent = '登录中...';
+        this.loginBtn.disabled = true;
+        if (this.loginError) this.loginError.style.display = 'none';
+
+        try {
+            const resp = await fetch('/web/api/user/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ nickname, password }),
+            });
+            if (!resp.ok) {
+                const errData = await resp.json();
+                throw new Error(errData.error || '登录失败');
+            }
+            const user = await resp.json();
+            this.currentUser = user;
+            this.token = user.token;
+            this.userTheme = user.theme || 'dark';
+            localStorage.setItem('xhs_token', user.token);
+            this.applyUserTheme();
+            this.showUserWidget(user);
+            this.loginModal.style.display = 'none';
+        } catch (e) {
+            if (this.loginError) {
+                this.loginError.textContent = e.message;
+                this.loginError.style.display = 'block';
+            } else {
+                alert('登录失败: ' + e.message);
+            }
+        } finally {
+            this.loginBtn.textContent = '登录';
+            this.loginBtn.disabled = false;
+        }
+    }
+
+    async handleResetPassword() {
+        const nickname = this.loginNickname.value.trim();
+        if (!nickname) {
+            this.loginNickname.focus();
+            this.loginNickname.style.borderColor = '#ff4757';
+            setTimeout(() => { this.loginNickname.style.borderColor = ''; }, 2000);
+            return;
+        }
+        if (!confirm(`确定要重置用户「${nickname}」的密码吗？\n重置后可以用任意密码登录。`)) return;
+
+        this.loginResetBtn.textContent = '重置中...';
+        this.loginResetBtn.disabled = true;
+
+        try {
+            const resp = await fetch('/web/api/user/reset-password', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ nickname }),
+            });
+            if (!resp.ok) {
+                const errData = await resp.json();
+                throw new Error(errData.error || '重置失败');
+            }
+            if (this.loginError) {
+                this.loginError.textContent = '✅ 密码已重置，输入任意密码即可登录';
+                this.loginError.style.display = 'block';
+                this.loginError.style.color = '#2ed573';
+                this.loginError.style.background = 'rgba(46, 213, 115, 0.1)';
+            }
+            this.loginPassword.value = '';
+            this.loginPassword.focus();
+        } catch (e) {
+            if (this.loginError) {
+                this.loginError.textContent = e.message;
+                this.loginError.style.display = 'block';
+                this.loginError.style.color = '#ff4757';
+                this.loginError.style.background = 'rgba(255, 71, 87, 0.1)';
+            } else {
+                alert('重置失败: ' + e.message);
+            }
+        } finally {
+            this.loginResetBtn.textContent = '忘记密码？重置';
+            this.loginResetBtn.disabled = false;
+        }
+    }
+
+    showUserWidget(user) {
+        if (!this.userWidget) return;
+        this.userWidget.style.display = 'flex';
+        if (user.avatar_url) {
+            this.userAvatar.src = user.avatar_url;
+            this.userAvatar.style.display = 'block';
+            this.userAvatar.onerror = () => {
+                this.userAvatar.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40"><circle cx="20" cy="20" r="20" fill="%23333"/></svg>';
+            };
+        } else {
+            this.userAvatar.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40"><circle cx="20" cy="20" r="20" fill="%23eee"/></svg>';
+            this.userAvatar.style.display = 'block';
+        }
+        this.userNickname.textContent = user.nickname || '用户';
+    }
+
+    showProfile() {
+        if (!this.profileModal || !this.currentUser) return;
+        this.profileModal.style.display = 'flex';
+        this.profileNickname.value = this.currentUser.nickname || '';
+        if (this.currentUser.avatar_url) {
+            this.profileAvatar.src = this.currentUser.avatar_url;
+        } else {
+            this.profileAvatar.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80"><rect fill="%23333" width="80" height="80" rx="40"/><text fill="%23fff" font-size="36" x="50%" y="50%" text-anchor="middle" dy=".35em">👤</text></svg>';
+        }
+
+        const theme = this.currentUser.theme || 'dark';
+        if (theme === 'light') {
+            this.profileThemeLight.classList.add('active');
+            this.profileThemeDark.classList.remove('active');
+        } else {
+            this.profileThemeDark.classList.add('active');
+            this.profileThemeLight.classList.remove('active');
+        }
+        this.userTheme = theme;
+    }
+
+    hideProfile() {
+        if (this.profileModal) this.profileModal.style.display = 'none';
+    }
+
+    async saveProfile() {
+        const nickname = this.profileNickname.value.trim();
+        if (!nickname) return;
+
+        try {
+            const resp = await fetch('/web/api/user/profile', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    token: this.token,
+                    nickname,
+                    theme: this.userTheme,
+                }),
+            });
+            if (!resp.ok) throw new Error('保存失败');
+            this.currentUser.nickname = nickname;
+            this.currentUser.theme = this.userTheme;
+            this.showUserWidget(this.currentUser);
+            this.hideProfile();
+        } catch (e) {
+            alert('保存失败: ' + e.message);
+        }
+    }
+
+    handleLogout() {
+        if (!confirm('确定要退出登录吗？')) return;
+        localStorage.removeItem('xhs_token');
+        this.token = '';
+        this.currentUser = null;
+        this.hideProfile();
+        if (this.userWidget) this.userWidget.style.display = 'none';
+        this.showLogin();
+    }
+
+    async uploadAvatar(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const formData = new FormData();
+        formData.append('token', this.token);
+        formData.append('file', file);
+
+        try {
+            const resp = await fetch('/web/api/user/avatar', {
+                method: 'POST',
+                body: formData,
+            });
+            if (!resp.ok) throw new Error('上传失败');
+            const data = await resp.json();
+            this.currentUser.avatar_url = data.avatar_url;
+            this.profileAvatar.src = data.avatar_url;
+            this.showUserWidget(this.currentUser);
+        } catch (e) {
+            alert('头像上传失败: ' + e.message);
+        }
+    }
+
+    applyUserTheme() {
+        if (this.userTheme === 'light') {
+            document.documentElement.setAttribute('data-theme', 'light');
+            this.themeToggle.textContent = '☀️';
+        } else {
+            document.documentElement.setAttribute('data-theme', 'dark');
+            this.themeToggle.textContent = '🌙';
+        }
     }
 
     getMediaUrl(url) {
@@ -1371,6 +1744,11 @@ class XHSWebUI {
             const extractPage = document.getElementById('extract-page');
             if (!extractPage || !extractPage.classList.contains('active')) return;
 
+            // iOS 冷却：如果上次检测失败了，5 秒内不再重复弹窗
+            if (this.isIOS() && this._clipboardCooldown && Date.now() - this._clipboardCooldown < 5000) {
+                return;
+            }
+
             // 检查环境支持
             if (!navigator.clipboard || !navigator.clipboard.readText) {
                 if (isGesture) console.log('当前环境（可能是非 HTTPS）不支持剪贴板访问');
@@ -1378,7 +1756,7 @@ class XHSWebUI {
             }
 
             // iOS Safari 限制：必须在用户手势（如点击）的任务周期内才能读取
-            // 如果不是由点击触发，且是 iOS，则跳过，等待用户点击页面
+            // 如果不是由点击触发，且是 iOS，则跳过
             if (this.isIOS() && !isGesture) return;
 
             const text = await navigator.clipboard.readText();
@@ -1390,7 +1768,10 @@ class XHSWebUI {
                 await this.autoTypeEffect(text);
             }
         } catch (err) {
-            // 权限受限或不支持剪贴板 API
+            // iOS 权限拒绝时设置冷却，避免频繁弹窗
+            if (this.isIOS()) {
+                this._clipboardCooldown = Date.now();
+            }
             if (isGesture) console.log('剪贴板访问受限:', err);
         }
     }

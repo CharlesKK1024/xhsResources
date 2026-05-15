@@ -224,19 +224,43 @@ class WebRecorder(IDRecorder):
             cache_date TEXT
             );"""
         )
+        await self.database.execute(
+            """CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nickname TEXT NOT NULL UNIQUE,
+            password_hash TEXT DEFAULT '',
+            avatar_url TEXT DEFAULT '',
+            theme TEXT DEFAULT 'dark',
+            token TEXT UNIQUE,
+            created_at TEXT
+            );"""
+        )
         await self.database.commit()
-        # 检查是否需要添加 source_url 列（针对旧数据库兼容）
+        # 兼容旧数据库：添加缺失的列
+        for col in ['source_url', 'user_id']:
+            try:
+                await self.database.execute(f"ALTER TABLE web_history ADD COLUMN {col} TEXT;")
+                await self.database.commit()
+            except:
+                pass
+        # 兼容旧数据库：添加 password_hash 列
         try:
-            await self.database.execute("ALTER TABLE web_history ADD COLUMN source_url TEXT;")
+            await self.database.execute("ALTER TABLE users ADD COLUMN password_hash TEXT DEFAULT '';")
+            await self.database.commit()
+        except:
+            pass
+        # 兼容旧数据库：添加 nickname UNIQUE 约束（SQLite 不支持 ALTER ADD CONSTRAINT，用 recreate 太复杂，业务层保证）
+        try:
+            await self.database.execute("ALTER TABLE users ADD COLUMN nickname TEXT;")
             await self.database.commit()
         except:
             pass
 
-    async def add_history(self, note_id: str, data: dict, author_id: str, author_name: str, source_url: str = None):
+    async def add_history(self, note_id: str, data: dict, author_id: str, author_name: str, source_url: str = None, user_id: int = 1):
         cache_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         await self.database.execute(
-            "INSERT OR REPLACE INTO web_history (note_id, note_data, cache_time, author_id, author_name, source_url) VALUES (?, ?, ?, ?, ?, ?);",
-            (note_id, json.dumps(data, ensure_ascii=False), cache_time, author_id, author_name, source_url),
+            "INSERT OR REPLACE INTO web_history (note_id, note_data, cache_time, author_id, author_name, source_url, user_id) VALUES (?, ?, ?, ?, ?, ?, ?);",
+            (note_id, json.dumps(data, ensure_ascii=False), cache_time, author_id, author_name, source_url, user_id),
         )
         await self.database.commit()
 
@@ -296,13 +320,25 @@ class WebRecorder(IDRecorder):
         )
         await self.database.commit()
 
-    async def get_history(self, search: str = None, sort: str = "time_desc"):
+    async def get_history(self, search: str = None, sort: str = "time_desc", user_id: int = None, include_legacy: bool = False):
         query = "SELECT note_data, cache_time, is_starred, tags FROM web_history"
         params = []
+        conditions = []
+        
+        if user_id is not None:
+            if include_legacy:
+                conditions.append("(user_id = ? OR user_id IS NULL)")
+            else:
+                conditions.append("user_id = ?")
+            params.append(user_id)
+        
         if search:
-            query += " WHERE note_data LIKE ? OR tags LIKE ? OR author_name LIKE ?"
+            conditions.append("(note_data LIKE ? OR tags LIKE ? OR author_name LIKE ?)")
             p = f"%{search}%"
             params.extend([p, p, p])
+        
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
         
         if sort == "time_desc":
             query += " ORDER BY cache_time DESC"
@@ -323,9 +359,17 @@ class WebRecorder(IDRecorder):
             for row in rows
         ]
 
-    async def get_collections(self, search: str = None, tag: str = None):
+    async def get_collections(self, search: str = None, tag: str = None, user_id: int = None, include_legacy: bool = False):
         query = "SELECT note_data, cache_time, is_starred, tags FROM web_history WHERE is_starred = 1"
         params = []
+        
+        if user_id is not None:
+            if include_legacy:
+                query += " AND (user_id = ? OR user_id IS NULL)"
+            else:
+                query += " AND user_id = ?"
+            params.append(user_id)
+        
         if search:
             query += " AND (note_data LIKE ? OR tags LIKE ? OR author_name LIKE ?)"
             p = f"%{search}%"
@@ -346,3 +390,83 @@ class WebRecorder(IDRecorder):
             }
             for row in rows
         ]
+
+    # ---- 用户管理 ----
+    async def create_user(self, nickname: str, token: str, password_hash: str = '') -> dict:
+        from datetime import datetime
+        created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        await self.database.execute(
+            "INSERT INTO users (nickname, password_hash, token, created_at) VALUES (?, ?, ?, ?);",
+            (nickname, password_hash, token, created_at),
+        )
+        await self.database.commit()
+        # 获取新插入的用户 ID
+        await self.cursor.execute("SELECT last_insert_rowid()")
+        user_id = (await self.cursor.fetchone())[0]
+        return {
+            "id": user_id,
+            "nickname": nickname,
+            "avatar_url": "",
+            "theme": "dark",
+            "token": token,
+        }
+
+    async def get_user_by_nickname(self, nickname: str) -> dict:
+        await self.cursor.execute(
+            "SELECT id, nickname, password_hash, avatar_url, theme, token FROM users WHERE nickname = ?",
+            (nickname,),
+        )
+        row = await self.cursor.fetchone()
+        if row:
+            return {
+                "id": row[0],
+                "nickname": row[1],
+                "password_hash": row[2] or "",
+                "avatar_url": row[3] or "",
+                "theme": row[4] or "dark",
+                "token": row[5],
+            }
+        return None
+
+    async def get_user_by_token(self, token: str) -> dict:
+        await self.cursor.execute(
+            "SELECT id, nickname, avatar_url, theme, token FROM users WHERE token = ?",
+            (token,),
+        )
+        row = await self.cursor.fetchone()
+        if row:
+            return {
+                "id": row[0],
+                "nickname": row[1],
+                "avatar_url": row[2] or "",
+                "theme": row[3] or "dark",
+                "token": row[4],
+            }
+        return None
+
+    async def update_user_profile(self, user_id: int, nickname: str = None, theme: str = None):
+        if nickname:
+            await self.database.execute("UPDATE users SET nickname = ? WHERE id = ?;", (nickname, user_id))
+        if theme:
+            await self.database.execute("UPDATE users SET theme = ? WHERE id = ?;", (theme, user_id))
+        await self.database.commit()
+
+    async def update_user_avatar(self, user_id: int, avatar_url: str):
+        await self.database.execute("UPDATE users SET avatar_url = ? WHERE id = ?;", (avatar_url, user_id))
+        await self.database.commit()
+
+    async def get_user_by_id(self, user_id: int) -> dict:
+        await self.cursor.execute(
+            "SELECT id, nickname, avatar_url, theme, token FROM users WHERE id = ?",
+            (user_id,),
+        )
+        row = await self.cursor.fetchone()
+        if row:
+            return {
+                "id": row[0],
+                "nickname": row[1],
+                "avatar_url": row[2] or "",
+                "theme": row[3] or "dark",
+                "token": row[4],
+            }
+        return None

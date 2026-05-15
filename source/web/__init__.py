@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Query, Response, Body
+from fastapi import FastAPI, Query, Response, Body, UploadFile, File, Form
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
@@ -7,6 +7,7 @@ import warnings
 import aiofiles
 import os
 import json
+import uuid
 from typing import List, Optional
 
 warnings.filterwarnings('ignore', message='Unverified HTTPS request')
@@ -32,16 +33,16 @@ def _normalize_media_url(url: str) -> str:
     return url
 
 
-def get_today_cache_dir() -> Path:
-    """获取今天的缓存目录：Cache/YYYYMMDD/"""
+def get_today_cache_dir(user_name: str = "default") -> Path:
+    """获取今天的缓存目录：Cache/photos/{user_name}/YYYYMMDD/"""
     today = datetime.now().strftime("%Y%m%d")
-    path = CACHE_DIR / today
+    path = CACHE_DIR / "photos" / user_name / today
     if not path.exists():
         path.mkdir(parents=True, exist_ok=True)
     return path
 
 
-async def download_to_cache(url: str, filename: str, note_info: dict = None, recorder: WebRecorder = None, force_refresh: bool = False) -> str:
+async def download_to_cache(url: str, filename: str, note_info: dict = None, recorder: WebRecorder = None, force_refresh: bool = False, user_name: str = "default") -> str:
     """下载并缓存文件，返回本地路径或 URL"""
     # 1. 先查数据库有没有这个 URL 的缓存
     if recorder and not force_refresh:
@@ -70,15 +71,13 @@ async def download_to_cache(url: str, filename: str, note_info: dict = None, rec
         name = re.sub(r'[\\/:*?"<>| ]', '_', name)
         return name
     
-    today_dir = get_today_cache_dir()
+    today_dir = get_today_cache_dir(user_name)
     today_str = datetime.now().strftime("%Y%m%d")
     
     if note_info:
         author = clean_name(note_info.get('author', '未知作者'))
         time_str = clean_name(note_info.get('time', '未知时间'))
         title = clean_name(note_info.get('title', '无标题'))[:20]
-        # 去掉可能导致编码问题的非 ASCII 字符，仅保留语义部分（可选，但为了安全建议保留）
-        # 这里我们保持原样，但确保 re.sub 已经处理了非法字符
         url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
         
         ext = filename.split('.')[-1] if '.' in filename else 'png'
@@ -90,7 +89,7 @@ async def download_to_cache(url: str, filename: str, note_info: dict = None, rec
         filename = f"proxy_{url_hash}.{ext}"
 
     file_path = today_dir / filename
-    relative_path = f"{today_str}/{filename}"
+    relative_path = f"photos/{user_name}/{today_str}/{filename}"
 
     if file_path.exists() and not force_refresh:
         if recorder:
@@ -123,7 +122,7 @@ async def download_to_cache(url: str, filename: str, note_info: dict = None, rec
                 
                 filename = filename.rsplit('.', 1)[0] + f".{real_ext}"
                 file_path = today_dir / filename
-                relative_path = f"{today_str}/{filename}"
+                relative_path = f"photos/{user_name}/{today_str}/{filename}"
 
             async with aiofiles.open(file_path, mode='wb') as f:
                 await f.write(content)
@@ -222,8 +221,17 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
         image_format: str = Query("webp", description="图片格式"),
         video_preference: str = Query("resolution", description="视频偏好"),
         refresh: bool = Query(False, description="是否强制刷新"),
+        token: str = Query("", description="用户令牌"),
     ):
         try:
+            # 解析 token 获取 user_id 和 user_name
+            user_id = 1
+            user_name = "default"
+            if token:
+                user_data = await recorder.get_user_by_token(token)
+                if user_data:
+                    user_id = user_data["id"]
+                    user_name = user_data["nickname"] or "default"
             # 如果不是强制刷新，先看数据库有没有这个 URL
             if not refresh:
                 history = await recorder.get_history_by_url(url)
@@ -236,13 +244,13 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
                     old_data = old_history["data"]
                     # 清理封面
                     if old_data.get("cover"):
-                        await download_to_cache(old_data["cover"], "", recorder=recorder, force_refresh=True)
+                        await download_to_cache(old_data["cover"], "", recorder=recorder, force_refresh=True, user_name=user_name)
                     # 清理图片
                     for img in old_data.get("images", []):
-                        await download_to_cache(img["url"], "", recorder=recorder, force_refresh=True)
+                        await download_to_cache(img["url"], "", recorder=recorder, force_refresh=True, user_name=user_name)
                     # 清理视频
                     for vid in old_data.get("videos", []):
-                        await download_to_cache(vid["url"], "", recorder=recorder, force_refresh=True)
+                        await download_to_cache(vid["url"], "", recorder=recorder, force_refresh=True, user_name=user_name)
 
             xhs.manager.image_format = image_format
             xhs.manager.video_preference = video_preference
@@ -296,7 +304,7 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
             # 自动缓存封面（带上作品信息进行命名优化）
             if data["cover"]:
                 ext = "png" if data["type"] == "图文" else "jpg"
-                cache_url = await download_to_cache(data["cover"], f"{note_id}_cover.{ext}", data, recorder, force_refresh=refresh)
+                cache_url = await download_to_cache(data["cover"], f"{note_id}_cover.{ext}", data, recorder, force_refresh=refresh, user_name=user_name)
                 data["cover"] = cache_url
 
             # 预先为作品中的所有媒体建立缓存映射，并更新返回的 URL 为本地路径
@@ -307,21 +315,21 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
                 if live_url:
                     img["raw_live_url"] = live_url
                     # 缓存 Live 图的视频部分
-                    cache_live_url = await download_to_cache(live_url, f"{note_id}_live_{img['index']}.mp4", data, recorder, force_refresh=refresh)
+                    cache_live_url = await download_to_cache(live_url, f"{note_id}_live_{img['index']}.mp4", data, recorder, force_refresh=refresh, user_name=user_name)
                     img["live_url_cached"] = cache_live_url
 
-                cache_url = await download_to_cache(img["url"], f"{note_id}_img_{img['index']}.png", data, recorder, force_refresh=refresh)
+                cache_url = await download_to_cache(img["url"], f"{note_id}_img_{img['index']}.png", data, recorder, force_refresh=refresh, user_name=user_name)
                 if cache_url.startswith("/web/cache"):
                     img["url"] = cache_url
                     
             for vid in data["videos"]:
                 vid["raw_url"] = vid["url"] # 保留原始 URL
-                cache_url = await download_to_cache(vid["url"], f"{note_id}_vid.mp4", data, recorder, force_refresh=refresh)
+                cache_url = await download_to_cache(vid["url"], f"{note_id}_vid.mp4", data, recorder, force_refresh=refresh, user_name=user_name)
                 if cache_url.startswith("/web/cache"):
                     vid["url"] = cache_url
 
             # 保存到历史记录（此时 data 中的 URL 已经是本地缓存路径了）
-            await recorder.add_history(note_id, data, data["authorId"], data["author"], url)
+            await recorder.add_history(note_id, data, data["authorId"], data["author"], url, user_id=user_id)
 
             return data
 
@@ -333,16 +341,34 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
     @app.get("/web/api/history")
     async def get_history(
         search: Optional[str] = None,
-        sort: str = "time_desc"
+        sort: str = "time_desc",
+        token: str = Query("", description="用户令牌"),
     ):
-        return await recorder.get_history(search, sort)
+        user_id = None
+        include_legacy = False
+        if token:
+            user_data = await recorder.get_user_by_token(token)
+            if user_data:
+                user_id = user_data["id"]
+                if user_data.get("nickname") == "龙哥":
+                    include_legacy = True
+        return await recorder.get_history(search, sort, user_id, include_legacy)
 
     @app.get("/web/api/collection")
     async def get_collection(
         search: Optional[str] = None,
-        tag: Optional[str] = None
+        tag: Optional[str] = None,
+        token: str = Query("", description="用户令牌"),
     ):
-        return await recorder.get_collections(search, tag)
+        user_id = None
+        include_legacy = False
+        if token:
+            user_data = await recorder.get_user_by_token(token)
+            if user_data:
+                user_id = user_data["id"]
+                if user_data.get("nickname") == "龙哥":
+                    include_legacy = True
+        return await recorder.get_collections(search, tag, user_id, include_legacy)
 
     @app.post("/web/api/star")
     async def toggle_star(payload: dict = Body(...)):
@@ -407,13 +433,13 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
                         os.remove(full_path) # 删除损坏的文件
 
             # 2. 如果数据库没有，则下载并存入“今天”的目录
-            today_dir = get_today_cache_dir()
+            today_dir = get_today_cache_dir("default")
             today_str = datetime.now().strftime("%Y%m%d")
             
             url_hash = hashlib.md5(clean_url.encode()).hexdigest()
             cache_name = f"proxy_{url_hash}.jpg"
             file_path = today_dir / cache_name
-            relative_path = f"{today_str}/{cache_name}"
+            relative_path = f"photos/default/{today_str}/{cache_name}"
             
             headers = HEADERS.copy()
             headers["referer"] = "https://www.xiaohongshu.com/"
@@ -437,7 +463,7 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
             if real_ext != "jpg":
                 cache_name = f"proxy_{url_hash}.{real_ext}"
                 file_path = today_dir / cache_name
-                relative_path = f"{today_str}/{cache_name}"
+                relative_path = f"photos/default/{today_str}/{cache_name}"
 
             # 保存到硬盘
             async with aiofiles.open(file_path, mode='wb') as f:
@@ -459,12 +485,172 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
             logging(lambda: print, f"代理缓存失败: {e}", ERROR)
             return JSONResponse({"error": str(e)}, status_code=502)
 
+    # ---- 用户管理 API ----
+
+    AVATAR_DIR = CACHE_DIR / "Avatars"
+    if not AVATAR_DIR.exists():
+        AVATAR_DIR.mkdir(parents=True, exist_ok=True)
+
+    def _hash_password(password: str) -> str:
+        return hashlib.sha256(password.encode()).hexdigest()
+
+    @app.post("/web/api/user/login")
+    async def user_login(payload: dict = Body(...)):
+        try:
+            nickname = payload.get("nickname", "").strip()
+            password = payload.get("password", "").strip()
+            token = payload.get("token", "").strip()
+
+            if not nickname and not token:
+                return JSONResponse({"error": "请提供昵称或密码"}, status_code=400)
+
+            # 如果有 token，尝试自动登录
+            if token:
+                user = await recorder.get_user_by_token(token)
+                if user:
+                    return user
+                return JSONResponse({"error": "令牌无效，请重新登录"}, status_code=401)
+
+            if not nickname:
+                return JSONResponse({"error": "请提供昵称"}, status_code=400)
+            if not password:
+                return JSONResponse({"error": "请提供密码"}, status_code=400)
+
+            # 检查昵称是否已存在
+            existing_user = await recorder.get_user_by_nickname(nickname)
+            if existing_user:
+                # 已有用户 → 验证密码
+                stored_hash = existing_user.get("password_hash", "")
+                if not stored_hash:
+                    # 旧用户没有密码，首次登录设置密码
+                    password_hash = _hash_password(password)
+                    await recorder.database.execute(
+                        "UPDATE users SET password_hash = ?, token = ? WHERE id = ?",
+                        (password_hash, str(uuid.uuid4()), existing_user["id"]),
+                    )
+                    await recorder.database.commit()
+                    # 重新获取用户（含新 token）
+                    existing_user = await recorder.get_user_by_nickname(nickname)
+                    return {
+                        "id": existing_user["id"],
+                        "nickname": existing_user["nickname"],
+                        "avatar_url": existing_user["avatar_url"],
+                        "theme": existing_user["theme"],
+                        "token": existing_user["token"],
+                        "is_new": False,
+                    }
+                if stored_hash != _hash_password(password):
+                    return JSONResponse({"error": "密码错误"}, status_code=401)
+                # 密码正确，返回已有用户
+                return {
+                    "id": existing_user["id"],
+                    "nickname": existing_user["nickname"],
+                    "avatar_url": existing_user["avatar_url"],
+                    "theme": existing_user["theme"],
+                    "token": existing_user["token"],
+                    "is_new": False,
+                }
+
+            # 新用户注册
+            password_hash = _hash_password(password)
+            new_token = str(uuid.uuid4())
+            user = await recorder.create_user(nickname, new_token, password_hash)
+            user["is_new"] = True
+            return user
+
+        except Exception as e:
+            logging(lambda: print, f"用户登录失败: {e}", ERROR)
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    @app.post("/web/api/user/reset-password")
+    async def reset_password(payload: dict = Body(...)):
+        try:
+            nickname = payload.get("nickname", "").strip()
+            if not nickname:
+                return JSONResponse({"error": "请提供昵称"}, status_code=400)
+
+            user = await recorder.get_user_by_nickname(nickname)
+            if not user:
+                return JSONResponse({"error": "用户不存在"}, status_code=404)
+
+            new_token = str(uuid.uuid4())
+            await recorder.database.execute(
+                "UPDATE users SET password_hash = '', token = ? WHERE id = ?",
+                (new_token, user["id"]),
+            )
+            await recorder.database.commit()
+
+            return {
+                "status": "success",
+                "message": "密码已重置，请用任意密码登录",
+                "token": new_token,
+            }
+        except Exception as e:
+            logging(lambda: print, f"重置密码失败: {e}", ERROR)
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    @app.get("/web/api/user/profile")
+    async def get_user_profile(token: str = Query("", description="用户令牌")):
+        try:
+            if not token:
+                return JSONResponse({"error": "缺少令牌"}, status_code=400)
+            user = await recorder.get_user_by_token(token)
+            if user:
+                return user
+            return JSONResponse({"error": "用户不存在"}, status_code=404)
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    @app.put("/web/api/user/profile")
+    async def update_user_profile(payload: dict = Body(...)):
+        try:
+            token = payload.get("token", "")
+            nickname = payload.get("nickname")
+            theme = payload.get("theme")
+
+            if not token:
+                return JSONResponse({"error": "缺少令牌"}, status_code=400)
+
+            user = await recorder.get_user_by_token(token)
+            if not user:
+                return JSONResponse({"error": "用户不存在"}, status_code=404)
+
+            await recorder.update_user_profile(user["id"], nickname=nickname, theme=theme)
+            return {"status": "success"}
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    @app.post("/web/api/user/avatar")
+    async def upload_avatar(token: str = Form(...), file: UploadFile = File(...)):
+        try:
+            user = await recorder.get_user_by_token(token)
+            if not user:
+                return JSONResponse({"error": "用户不存在"}, status_code=404)
+
+            nickname = user.get("nickname", "user")
+            safe_name = re.sub(r'[\\/:*?"<>| ]', '_', nickname)
+            ext = file.filename.rsplit(".", 1)[-1] if "." in file.filename else "jpg"
+            avatar_name = f"avatar_{safe_name}.{ext}"
+            avatar_path = AVATAR_DIR / avatar_name
+
+            content = await file.read()
+            async with aiofiles.open(avatar_path, "wb") as f:
+                await f.write(content)
+
+            avatar_url = f"/web/cache/Avatars/{avatar_name}"
+            await recorder.update_user_avatar(user["id"], avatar_url)
+            return {"avatar_url": avatar_url}
+
+        except Exception as e:
+            logging(lambda: print, f"头像上传失败: {e}", ERROR)
+            return JSONResponse({"error": str(e)}, status_code=500)
+
     return app
 
 
 async def run_web_server(
     host: str = "0.0.0.0",
-    port: int = 5001,
+    port: int = 5008,
     log_level: str = "info",
 ):
     from uvicorn import Config, Server

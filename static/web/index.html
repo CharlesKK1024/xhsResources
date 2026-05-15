@@ -34,8 +34,17 @@
         </nav>
       </aside>
 
-      <!-- 顶部操作栏 (深色模式/设置) -->
+      <!-- 顶部操作栏 -->
       <div class="top-header-actions">
+        <!-- 用户信息 -->
+        <div id="userWidget" class="user-widget" style="display: none">
+          <div class="user-avatar-wrap">
+            <img id="userAvatar" class="user-avatar" src="" alt="头像" />
+          </div>
+          <div class="user-nameplate">
+            <span id="userNickname" class="user-nickname"></span>
+          </div>
+        </div>
         <div id="cardScaler" class="scaler-popup" style="display: none">
           <span class="scaler-label">卡片缩放</span>
           <input type="range" id="scaleRange" min="-80" max="150" value="0" />
@@ -283,7 +292,7 @@
     <div id="fullViewer" class="full-viewer" style="display: none">
       <div class="viewer-overlay"></div>
       <div class="viewer-content">
-        <img id="viewerImg" src="" alt="预览图" />
+        <img id="viewerImg" src="" alt="预览图" referrerpolicy="no-referrer" />
         <div id="viewerCounter" class="viewer-counter">1 / 1</div>
       </div>
       <button class="viewer-close">✕</button>
@@ -329,6 +338,74 @@
           <span class="footer-action"
             >💬 <span id="noteCommentCount"></span
           ></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 登录弹窗 -->
+    <div id="loginModal" class="login-modal" style="display: none">
+      <div class="login-overlay"></div>
+      <div class="login-box">
+        <div class="login-icon">📕</div>
+        <h2 class="login-title">欢迎使用 XHS-Downloader</h2>
+        <p class="login-desc" id="loginDesc">输入昵称和密码登录，同一账号跨设备同步数据</p>
+        <div class="login-avatar-row">
+          <div class="login-avatar" id="loginAvatarPreview">👤</div>
+        </div>
+        <input
+          type="text"
+          id="loginNickname"
+          class="login-input"
+          placeholder="输入你的昵称..."
+          maxlength="20"
+          autocomplete="username"
+        />
+        <div class="login-password-row">
+          <input
+            type="password"
+            id="loginPassword"
+            class="login-input"
+            placeholder="输入密码..."
+            maxlength="32"
+            autocomplete="current-password"
+          />
+          <button type="button" id="loginPasswordToggle" class="login-pw-toggle">👁️</button>
+        </div>
+        <div id="loginError" class="login-error" style="display: none"></div>
+        <button id="loginBtn" class="login-btn">登录</button>
+        <div class="login-reset-row">
+          <button id="loginResetBtn" class="login-reset-btn">忘记密码？重置</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 个人设置弹窗 -->
+    <div id="profileModal" class="profile-modal" style="display: none">
+      <div class="profile-overlay"></div>
+      <div class="profile-box">
+        <div class="profile-header">
+          <h3>个人设置</h3>
+          <button id="profileClose" class="profile-close">✕</button>
+        </div>
+        <div class="profile-body">
+          <div class="profile-avatar-section">
+            <img id="profileAvatar" class="profile-avatar" src="" alt="头像" />
+            <button id="profileAvatarBtn" class="profile-avatar-btn">更换头像</button>
+            <input type="file" id="profileAvatarInput" accept="image/*" style="display: none" />
+          </div>
+          <div class="profile-field">
+            <label>昵称</label>
+            <input type="text" id="profileNickname" class="profile-input" maxlength="20" />
+          </div>
+          <div class="profile-field">
+            <label>主题模式</label>
+            <div class="profile-theme-row">
+              <button id="profileThemeDark" class="profile-theme-btn active">🌙 深色</button>
+              <button id="profileThemeLight" class="profile-theme-btn">☀️ 浅色</button>
+            </div>
+          </div>
+          <button id="profileSave" class="profile-save-btn">保存设置</button>
+          <button id="profileLogout" class="profile-logout-btn">退出登录</button>
         </div>
       </div>
     </div>
