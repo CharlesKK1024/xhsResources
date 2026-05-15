@@ -589,6 +589,25 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
             logging(lambda: print, f"重置密码失败: {e}", ERROR)
             return JSONResponse({"error": str(e)}, status_code=500)
 
+    @app.get("/web/api/author/avatar")
+    async def get_author_avatar(
+        author_id: str = Query("", description="作者ID"),
+        token: str = Query("", description="用户令牌"),
+    ):
+        try:
+            if not author_id:
+                return JSONResponse({"error": "缺少作者ID"}, status_code=400)
+            user_id = None
+            if token:
+                user = await recorder.get_user_by_token(token)
+                if user:
+                    user_id = user["id"]
+            cover_url = await recorder.get_author_first_cover(author_id, user_id)
+            return {"cover": cover_url}
+        except Exception as e:
+            logging(lambda: print, f"获取作者头像失败: {e}", ERROR)
+            return JSONResponse({"error": str(e)}, status_code=500)
+
     @app.get("/web/api/user/profile")
     async def get_user_profile(token: str = Query("", description="用户令牌")):
         try:

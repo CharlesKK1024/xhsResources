@@ -36,6 +36,7 @@ class XHSWebUI {
         this.editModeBtn = document.getElementById('editModeBtn');
         this.previewSection = document.querySelector('.preview-section');
         this.scaleBtn = document.getElementById('scaleBtn');
+        this.editModeToggle = document.getElementById('editModeToggle');
         this.cardScaler = document.getElementById('cardScaler');
         this.scaleRange = document.getElementById('scaleRange');
         this.scaleValue = document.getElementById('scaleValue');
@@ -106,6 +107,8 @@ class XHSWebUI {
 
         // 状态
         this.isEditMode = false;
+        this.isListEditMode = false;
+        this._authorAvatarCache = {};
         this.swipeInstances = [];
         this.viewerList = []; // 当前查看器中的图片列表
         this.viewerIndex = 0; // 当前图片索引
@@ -172,6 +175,16 @@ class XHSWebUI {
                 this.cardScaler.style.display = 'none';
             }
         });
+
+        // 编辑模式切换
+        if (this.editModeToggle) {
+            this.editModeToggle.addEventListener('click', () => {
+                this.isListEditMode = !this.isListEditMode;
+                this.editModeToggle.classList.toggle('active', this.isListEditMode);
+                // 在主内容区添加/移除编辑模式类，控制删除按钮显隐
+                document.querySelector('.main-content').classList.toggle('edit-mode-active', this.isListEditMode);
+            });
+        }
 
         // 全景查看器事件
         this.viewerClose.onclick = () => this.closeViewer();
@@ -435,6 +448,8 @@ class XHSWebUI {
     async loadInitialData() {
         this.loadSettings();
         await this.initUser();
+        // 默认页面是作品集，执行页面切换逻辑（控制按钮显隐等）
+        this.switchPage('history-page');
     }
 
     loadSettings() {
@@ -470,6 +485,18 @@ class XHSWebUI {
         // 缩放按钮显隐控制：仅在作品集或收藏页面显示
         if (this.scaleBtn) {
             this.scaleBtn.style.display = (targetId === 'history-page' || targetId === 'collection-page') ? 'flex' : 'none';
+        }
+
+        // 编辑模式按钮显隐控制：仅在作品集或收藏页面显示
+        if (this.editModeToggle) {
+            const isListPage = (targetId === 'history-page' || targetId === 'collection-page');
+            this.editModeToggle.style.display = isListPage ? 'flex' : 'none';
+            // 离开列表页时，自动关闭编辑模式
+            if (!isListPage && this.isListEditMode) {
+                this.isListEditMode = false;
+                this.editModeToggle.classList.remove('active');
+                document.querySelector('.main-content').classList.remove('edit-mode-active');
+            }
         }
 
         if (targetId === 'history-page') this.loadHistory();
@@ -582,15 +609,53 @@ class XHSWebUI {
 
         // 渲染作者信息
         this.noteAuthorName.textContent = note.author || '未知作者';
-        const coverUrl = (isMobile && note.raw_cover) ? note.raw_cover : note.cover;
-        const noteAvatarUrl = this.getMediaUrl(coverUrl);
-        this.noteAvatar.setAttribute('referrerpolicy', 'no-referrer');
-        this.noteAvatar.src = noteAvatarUrl;
+        
+        // 使用作者固定头像（该作者第一个作品的封面），缓存避免重复请求
+        const authorId = note.authorId || '';
+        if (authorId && this._authorAvatarCache[authorId]) {
+            this.noteAvatar.src = this.getMediaUrl(this._authorAvatarCache[authorId]);
+            this.noteAvatar.setAttribute('referrerpolicy', 'no-referrer');
+        } else {
+            // 临时用当前封面占位
+            const tmpCover = (isMobile && note.raw_cover) ? note.raw_cover : note.cover;
+            this.noteAvatar.src = this.getMediaUrl(tmpCover);
+            this.noteAvatar.setAttribute('referrerpolicy', 'no-referrer');
+            // 异步获取作者第一个作品的封面
+            if (authorId) {
+                fetch(`/web/api/author/avatar?author_id=${encodeURIComponent(authorId)}&token=${encodeURIComponent(this.token)}`)
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data && data.cover) {
+                            this._authorAvatarCache[authorId] = data.cover;
+                            this.noteAvatar.src = this.getMediaUrl(data.cover);
+                        }
+                    })
+                    .catch(() => {});
+            }
+        }
         
         // 渲染分享图标
         if (this.noteShareBtn && window.svgIconShare) {
             this.noteShareBtn.innerHTML = window.svgIconShare;
         }
+        // 分享按钮：点击复制原文链接
+        this.noteShareBtn.onclick = (e) => {
+            e.stopPropagation();
+            const shareUrl = note.url || note.source_url || '';
+            if (shareUrl) {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(shareUrl).then(() => {
+                        if (window.showToast) window.showToast('复制成功，快分享给好友吧');
+                    }).catch(() => {
+                        this._fallbackCopy(shareUrl);
+                    });
+                } else {
+                    this._fallbackCopy(shareUrl);
+                }
+            } else {
+                if (window.showToast) window.showToast('暂无分享链接');
+            }
+        };
         
         // 渲染媒体内容
         this.noteMediaWrapper.innerHTML = '';
@@ -784,7 +849,18 @@ class XHSWebUI {
 
         // 渲染文本内容
         this.noteDetailTitle.textContent = note.title || '无标题';
-        this.noteDetailDesc.textContent = note.desc || '';
+        
+        // 描述去重：去除 desc 中 #标签 部分（tags 会单独用蓝色标签渲染）
+        let cleanDesc = note.desc || '';
+        if (note.tags) {
+            const tagList = note.tags.split(/[#\s]+/).filter(t => t.trim());
+            tagList.forEach(tag => {
+                if (tag) {
+                    cleanDesc = cleanDesc.replace(new RegExp(`#${tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*`, 'g'), '');
+                }
+            });
+        }
+        this.noteDetailDesc.textContent = cleanDesc.trim();
         
         // 渲染标签
         this.noteDetailTags.innerHTML = '';
@@ -1209,6 +1285,7 @@ class XHSWebUI {
                         👤 ${author}
                         <button class="panorama-btn" title="查看该作者全景图集">🖼️ 全景视图</button>
                         <button class="waterfall-btn" title="查看该作者瀑布流图集">🧱 瀑布视图</button>
+                        <button class="mode-toggle-btn" title="切换作品展示模式" data-mode="scroll">📐 横排</button>
                     </div>
                     <div class="author-work-count">${authorItems.length} 个作品</div>
                 `;
@@ -1238,6 +1315,21 @@ class XHSWebUI {
                 const wrapper = document.createElement('div');
                 wrapper.className = 'cards-wrapper';
 
+                // 模式切换状态
+                let currentMode = 'scroll';
+                const modeLabels = { scroll: '📐 横排', wrap: '📦 换行', ring: '🔄 环形' };
+                const modeToggleBtn = header.querySelector('.mode-toggle-btn');
+
+                modeToggleBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    const modes = ['scroll', 'wrap', 'ring'];
+                    const idx = modes.indexOf(currentMode);
+                    currentMode = modes[(idx + 1) % modes.length];
+                    modeToggleBtn.textContent = modeLabels[currentMode];
+                    modeToggleBtn.dataset.mode = currentMode;
+                    this._applyCardMode(viewport, wrapper, currentMode, row, authorItems);
+                };
+
                 authorItems.forEach(item => {
                     const note = item.data;
                     if (!note) return; // 跳过空数据
@@ -1263,7 +1355,8 @@ class XHSWebUI {
                     const deleteBtn = card.querySelector('.delete-item-btn');
                     deleteBtn.onclick = async (e) => {
                         e.stopPropagation();
-                        if (!confirm('确定要删除这条记录吗？')) return;
+                        const title = note.title || '无标题';
+                        if (!confirm(`确定要删除作品「${title}」吗？\n此操作不可恢复。`)) return;
                         try {
                             const resp = await fetch(`/web/api/history/${note.id}`, { method: 'DELETE' });
                             if (resp.ok) {
@@ -1284,6 +1377,9 @@ class XHSWebUI {
                     let isMoving = false;
 
                     const startPress = (e) => {
+                        // 编辑模式下禁用所有卡片交互
+                        if (this.isListEditMode) return;
+                        
                         const touch = e.touches ? e.touches[0] : e;
                         startX = touch.clientX;
                         startY = touch.clientY;
@@ -1309,6 +1405,7 @@ class XHSWebUI {
                     };
 
                     const movePress = (e) => {
+                        if (this.isListEditMode) return;
                         const touch = e.touches ? e.touches[0] : e;
                         const deltaX = Math.abs(touch.clientX - startX);
                         const deltaY = Math.abs(touch.clientY - startY);
@@ -1322,6 +1419,7 @@ class XHSWebUI {
                     };
 
                     const cancelPress = () => {
+                        if (this.isListEditMode) return;
                         clearTimeout(pressTimer);
                         card.classList.remove('charging');
                     };
@@ -1329,6 +1427,8 @@ class XHSWebUI {
                     const endPress = (e) => {
                         clearTimeout(pressTimer);
                         card.classList.remove('charging');
+                        // 编辑模式下不打开详情
+                        if (this.isListEditMode) return;
                         if (!isLongPress && !isMoving) {
                             // 既不是长按也不是滑动，才是短按详情
                             this.openNoteDetail(note);
@@ -1352,14 +1452,86 @@ class XHSWebUI {
                 container.appendChild(row);
 
                 // 初始化堆叠滑动
+                let swipeInstance = null;
                 if (window.StackSwipe) {
-                    const swipe = new StackSwipe(viewport);
-                    this.swipeInstances.push(swipe);
+                    swipeInstance = new StackSwipe(viewport);
+                    this.swipeInstances.push(swipeInstance);
                 }
+
+                // 保存 swipe 实例引用，供模式切换时销毁
+                viewport._swipeInstance = swipeInstance;
             } catch (err) {
                 console.error(`渲染作者 ${author} 的作品失败:`, err);
             }
         });
+    }
+
+    _applyCardMode(viewport, wrapper, mode, row, authorItems) {
+        // 销毁 swipe 实例
+        if (viewport._swipeInstance) {
+            const idx = this.swipeInstances.indexOf(viewport._swipeInstance);
+            if (idx > -1) this.swipeInstances.splice(idx, 1);
+            viewport._swipeInstance = null;
+        }
+
+        // 清除所有模式类和内联样式，回到 base
+        viewport.classList.remove('cards-viewport--wrap', 'cards-viewport--ring');
+        wrapper.classList.remove('cards-wrapper--wrap', 'cards-wrapper--ring');
+
+        const cards = wrapper.querySelectorAll('.list-item');
+        cards.forEach(c => {
+            c.style.transform = '';
+            c.style.position = '';
+            c.style.left = '';
+            c.style.top = '';
+            c.style.zIndex = '';
+            c.style.transition = '';
+        });
+
+        // 移除 viewport 和 wrapper 上所有可能的内联样式
+        const vpProps = ['height','overflowX','overflowY','cursor','touchAction','userSelect'];
+        const wrProps = ['display','flexWrap','justifyContent','alignItems','paddingBottom','height','width'];
+        vpProps.forEach(p => viewport.style[p] = '');
+        wrProps.forEach(p => wrapper.style[p] = '');
+        row.style.height = '';
+
+        if (mode === 'scroll') {
+            // 恢复横排滚动模式 — 依赖 base CSS，不需要内联
+            // StackSwipe 会重新初始化
+            if (window.StackSwipe) {
+                const swipe = new StackSwipe(viewport);
+                this.swipeInstances.push(swipe);
+                viewport._swipeInstance = swipe;
+            }
+        } else if (mode === 'wrap') {
+            viewport.classList.add('cards-viewport--wrap');
+            wrapper.classList.add('cards-wrapper--wrap');
+        } else if (mode === 'ring') {
+            viewport.classList.add('cards-viewport--ring');
+            wrapper.classList.add('cards-wrapper--ring');
+
+            const count = cards.length;
+            const radius = Math.min(16, count * 3);
+            cards.forEach((card, i) => {
+                const angle = (i / count) * Math.PI * 2 - Math.PI / 2;
+                const x = Math.cos(angle) * radius;
+                const y = Math.sin(angle) * radius;
+                const rotation = (angle * 180 / Math.PI) + 90;
+                const baseTransform = `translateX(${x}vh) translateY(${y}vh) rotate(${rotation}deg)`;
+                card.style.position = 'relative';
+                card.style.transform = baseTransform;
+                card.style.zIndex = Math.round(count - i);
+                card.style.transition = 'transform 0.3s ease, z-index 0.3s ease';
+                card.addEventListener('mouseenter', function onRingHover() {
+                    this.style.transform = `${baseTransform} scale(1.2)`;
+                    this.style.zIndex = '999';
+                });
+                card.addEventListener('mouseleave', function onRingLeave() {
+                    this.style.transform = baseTransform;
+                    this.style.zIndex = Math.round(count - i);
+                });
+            });
+        }
     }
 
     // ---- 用户管理 ----
@@ -1438,6 +1610,8 @@ class XHSWebUI {
             this.applyUserTheme();
             this.showUserWidget(user);
             this.loginModal.style.display = 'none';
+            // 登录后自动跳转到作品集并加载数据
+            this.switchPage('history-page');
         } catch (e) {
             if (this.loginError) {
                 this.loginError.textContent = e.message;
@@ -1637,6 +1811,22 @@ class XHSWebUI {
         // Live 视频不走图片代理；本地缓存直接用缓存路径，远程地址直接直连
         if (url.startsWith('/web/cache')) return url;
         return url;
+    }
+
+    _fallbackCopy(text) {
+        try {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.left = '-9999px';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+            if (window.showToast) window.showToast('复制成功，快分享给好友吧');
+        } catch (e) {
+            if (window.showToast) window.showToast('复制失败，请手动复制');
+        }
     }
 
     isAndroid() {

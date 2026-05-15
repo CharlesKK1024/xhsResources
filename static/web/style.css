@@ -205,6 +205,12 @@ body {
     transform: translateY(-0.2vh);
 }
 
+.action-btn-edit.active {
+    border-color: #ff4757;
+    background: rgba(255, 71, 87, 0.15);
+    box-shadow: 0 0 1.5vh rgba(255, 71, 87, 0.3);
+}
+
 /* 主内容区 - 100% 宽度适配 */
 .main-content {
     flex: 1;
@@ -427,8 +433,47 @@ body {
 }
 .delete-item-btn{
     position: absolute;
-    right: 0;
+    top: 0.4vh;
+    right: 0.4vh;
+    width: 2.8vh;
+    height: 2.8vh;
+    border-radius: 50%;
+    border: none;
+    background: rgba(0, 0, 0, 0.6);
+    color: #fff;
+    font-size: 1.6vh;
+    cursor: pointer;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    z-index: 10;
+    transition: background 0.2s;
+    padding: 0;
 }
+
+.delete-item-btn:hover {
+    background: #ff4757;
+}
+
+.edit-mode-active .delete-item-btn {
+    display: flex;
+}
+
+.edit-mode-active .list-item {
+    cursor: default;
+}
+
+.edit-mode-active .list-item:hover {
+    border-color: var(--border-color);
+    z-index: auto;
+}
+
+.edit-mode-active .list-item .item-cover img,
+.edit-mode-active .list-item .item-info {
+    pointer-events: none;
+}
+
 .author-row {
     width: 100%;
     position: relative;
@@ -492,6 +537,95 @@ body {
 
 .panorama-btn:hover, .waterfall-btn:hover {
     transform: scale(1.05);
+}
+
+.mode-toggle-btn {
+    background: linear-gradient(135deg, #2d3436, #636e72);
+    color: white;
+    border: none;
+    padding: 0.4vh 1.2vw;
+    border-radius: 2vh;
+    font-size: 1.1vh;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 0.4vh 1vh rgba(0, 0, 0, 0.2);
+    transition: all 0.3s;
+    display: flex;
+    align-items: center;
+    gap: 0.4vw;
+}
+
+.mode-toggle-btn[data-mode="wrap"] {
+    background: linear-gradient(135deg, #00b894, #00cec9);
+}
+
+.mode-toggle-btn[data-mode="ring"] {
+    background: linear-gradient(135deg, #e17055, #d63031);
+}
+
+.mode-toggle-btn:hover {
+    transform: scale(1.05);
+}
+
+/* 换行模式 - 使用 Grid 行列对齐全部重置 */
+.cards-viewport--wrap {
+    all: revert !important;
+    width: 100% !important;
+    height: auto !important;
+    cursor: default !important;
+    user-select: auto !important;
+    -webkit-user-select: auto !important;
+    touch-action: auto !important;
+    overflow: visible !important;
+    position: relative !important;
+}
+
+.cards-viewport--wrap:active {
+    cursor: default !important;
+}
+
+.cards-wrapper--wrap {
+    display: grid !important;
+    grid-template-columns: repeat(auto-fill, calc(15vh * var(--card-scale))) !important;
+    justify-content: start !important;
+    gap: 2vh 2vh !important;
+    padding: 0 1.5vw 2vh 1.5vw !important;
+    height: auto !important;
+    will-change: auto !important;
+    transform: none !important;
+    width: 100% !important;
+}
+
+/* 环形模式 - 全部重置 */
+.cards-viewport--ring {
+    all: revert !important;
+    width: 100% !important;
+    height: 40vh !important;
+    cursor: default !important;
+    user-select: auto !important;
+    -webkit-user-select: auto !important;
+    touch-action: auto !important;
+    overflow: visible !important;
+    position: relative !important;
+}
+
+.cards-viewport--ring:active {
+    cursor: default !important;
+}
+
+.cards-wrapper--ring {
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    justify-content: center !important;
+    align-items: center !important;
+    height: 38vh !important;
+    padding: 0 !important;
+    transform: none !important;
+}
+
+.cards-wrapper--ring .list-item {
+    flex-shrink: 0;
+    transition: transform 0.3s ease;
 }
 
 .panorama-btn:active, .waterfall-btn:active {
@@ -1884,4 +2018,33 @@ body {
 .profile-logout-btn:hover {
     background: #ff4757;
     color: white;
+}
+
+/* ========== 通用 Toast 组件 ========== */
+.xhs-toast {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0.85);
+    background: rgba(0, 0, 0, 0.82);
+    color: #fff;
+    font-size: 1.6vh;
+    font-weight: 700;
+    padding: 1.4vh 3.6vh;
+    border-radius: 5vh;
+    z-index: 99999;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.25s ease, transform 0.25s ease;
+    white-space: nowrap;
+    max-width: 85vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    backdrop-filter: blur(0.4vh);
+    -webkit-backdrop-filter: blur(0.4vh);
+}
+
+.xhs-toast--visible {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
 }

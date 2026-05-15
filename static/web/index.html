@@ -22,10 +22,10 @@
           <h1 class="logo-text">XHS-Downloader</h1>
         </div>
         <nav class="nav-menu">
-          <button class="nav-item active" data-target="extract-page">
+          <button class="nav-item" data-target="extract-page">
             <span class="nav-icon">🔍</span> 提取作品
           </button>
-          <button class="nav-item" data-target="history-page">
+          <button class="nav-item active" data-target="history-page">
             <span class="nav-icon">🕒</span> 作品集
           </button>
           <button class="nav-item" data-target="collection-page">
@@ -58,6 +58,9 @@
         >
           🔍
         </button>
+        <button id="editModeToggle" class="action-btn action-btn-edit" title="编辑模式" style="display: none">
+          ✏️
+        </button>
         <button id="themeToggle" class="action-btn" title="切换深色/浅色模式">
           🌙
         </button>
@@ -66,7 +69,7 @@
 
       <main class="main-content">
         <!-- 提取页面 -->
-        <section id="extract-page" class="page active">
+        <section id="extract-page" class="page">
           <header class="page-header">
             <h2>提取作品</h2>
             <p class="subtitle">小红书作品在线提取工具</p>
@@ -161,7 +164,7 @@
         </section>
 
         <!-- 作品集页面 -->
-        <section id="history-page" class="page">
+        <section id="history-page" class="page active">
           <header class="page-header">
             <h2>作品集</h2>
             <div class="header-actions">
@@ -413,6 +416,7 @@
     <script src="/web/static/utils/swipe.js"></script>
     <script src="/web/static/utils/svg.js"></script>
     <script src="/web/static/utils/tools.js"></script>
+    <script src="/web/static/componentUtils/toast.js"></script>
     <script src="/web/static/script.js"></script>
   </body>
 </html>

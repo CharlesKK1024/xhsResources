@@ -359,6 +359,24 @@ class WebRecorder(IDRecorder):
             for row in rows
         ]
 
+    async def get_author_first_cover(self, author_id: str, user_id: int = None) -> str:
+        """获取该作者第一个缓存作品的封面 URL"""
+        query = "SELECT note_data FROM web_history WHERE author_id = ? AND note_data LIKE '%\"cover\"%'"
+        params = [author_id]
+        if user_id is not None:
+            query += " AND (user_id = ? OR user_id IS NULL)"
+            params.append(user_id)
+        query += " ORDER BY cache_time ASC LIMIT 1"
+        await self.cursor.execute(query, tuple(params))
+        row = await self.cursor.fetchone()
+        if row:
+            try:
+                data = json.loads(row[0])
+                return data.get("cover") or data.get("raw_cover") or ""
+            except:
+                pass
+        return ""
+
     async def get_collections(self, search: str = None, tag: str = None, user_id: int = None, include_legacy: bool = False):
         query = "SELECT note_data, cache_time, is_starred, tags FROM web_history WHERE is_starred = 1"
         params = []
