@@ -19,7 +19,7 @@
       <aside class="sidebar">
         <!-- 作品集筛选栏 (动态显隐) -->
         <div id="historyControls" class="sidebar-filter">
-          <span class="filter-bar-title">作品集</span>
+          <button id="tagPanelBtn" class="filter-bar-tag-btn">🏷️ 标签集</button>
           <input type="text" id="historySearch" class="filter-bar-search" placeholder="搜索..." />
           <select id="historySort" class="filter-bar-sort">
             <option value="time_desc">新→旧</option>
@@ -75,6 +75,7 @@
         <button id="editModeToggle" class="action-btn action-btn-edit" title="编辑模式" style="display: none">
           ✏️
         </button>
+        <button id="mapBtn" class="action-btn" title="地图统计" style="display: none">🌍</button>
         <button id="themeToggle" class="action-btn" title="切换深色/浅色模式">
           🌙
         </button>
@@ -380,6 +381,10 @@
           <button type="button" id="loginPasswordToggle" class="login-pw-toggle">👁️</button>
         </div>
         <div id="loginError" class="login-error" style="display: none"></div>
+        <label class="login-remember">
+          <input type="checkbox" id="loginRemember" />
+          <span>记住账号密码</span>
+        </label>
         <button id="loginBtn" class="login-btn">登录</button>
         <div class="login-reset-row">
           <button id="loginResetBtn" class="login-reset-btn">忘记密码？重置</button>
@@ -421,6 +426,8 @@
     <link rel="stylesheet" href="/web/static/componentUtils/authorProfile.css">
     <link rel="stylesheet" href="/web/static/componentUtils/chatUI.css">
 
+    <script src="/web/static/lib/echarts.min.js"></script>
+    <script src="/web/static/lib/china.js"></script>
     <script src="/web/static/utils/swipe.js"></script>
     <script src="/web/static/utils/svg.js"></script>
     <script src="/web/static/utils/tools.js"></script>

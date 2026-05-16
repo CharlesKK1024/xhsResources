@@ -6,6 +6,7 @@
     let currentApp = null;
     let currentAvatar = '';
     let currentWorks = [];
+    let tagsScrollTimer = null;
 
     function getOrCreateOverlay() {
         if (overlay && document.body.contains(overlay)) return overlay;
@@ -15,6 +16,7 @@
             <div class="author-profile-header">
                 <button class="ap-back">‹</button>
                 <span class="ap-header-title"></span>
+                <button class="ap-xhs-link" title="查看小红书主页">🔗</button>
                 <button class="ap-more">···</button>
             </div>
             <div class="author-profile-content">
@@ -26,6 +28,7 @@
                             <span class="ap-uid-text"></span>
                             <button class="ap-uid-copy" title="复制ID">📋</button>
                         </div>
+                        <div class="ap-ip-location"></div>
                     </div>
                     <div class="ap-info-right">
                         <div class="ap-tags-section">
@@ -48,6 +51,19 @@
         document.body.appendChild(overlay);
 
         overlay.querySelector('.ap-back').onclick = close;
+        overlay.querySelector('.ap-xhs-link').onclick = function (e) {
+            e.stopPropagation();
+            if (!currentAuthorId) return;
+            var deepLink = 'xhsdiscover://user/' + currentAuthorId + '/';
+            var webUrl = 'https://www.xiaohongshu.com/user/profile/' + currentAuthorId;
+            var start = Date.now();
+            window.location.href = deepLink;
+            setTimeout(function () {
+                if (Date.now() - start < 1800) {
+                    window.open(webUrl, '_blank');
+                }
+            }, 1500);
+        };
         overlay.querySelector('.ap-uid-copy').onclick = function () {
             if (currentAuthorId) {
                 navigator.clipboard.writeText(currentAuthorId).then(function () {
@@ -194,10 +210,12 @@
         currentAuthorId = authorId;
         currentApp = appInstance;
         var el = getOrCreateOverlay();
+        el.style.zIndex = window.nextOverlayZ();
 
         el.querySelector('.ap-header-title').textContent = authorName;
         el.querySelector('.ap-name').textContent = authorName;
         el.querySelector('.ap-uid-text').textContent = '小红书号: ' + authorId.slice(-8);
+        el.querySelector('.ap-ip-location').textContent = '';
         el.querySelector('.ap-tags-scroll').innerHTML = '';
         el.querySelector('.ap-works-grid').innerHTML = '<div class="ap-loading">加载中...</div>';
         el.querySelector('.ap-works-count').textContent = '';
@@ -231,6 +249,17 @@
             renderTags(el, data.tags || []);
             renderWorks(el, currentWorks);
             el.querySelector('.ap-works-count').textContent = currentWorks.length + ' 篇';
+
+            // 从最新帖子获取IP归属地
+            var ipLoc = '';
+            for (var i = 0; i < currentWorks.length; i++) {
+                var noteData = currentWorks[i].data;
+                if (noteData && noteData.ipLocation) {
+                    ipLoc = noteData.ipLocation;
+                    break;
+                }
+            }
+            el.querySelector('.ap-ip-location').textContent = ipLoc ? '📍 IP归属: ' + ipLoc : '';
         } catch (e) {
             el.querySelector('.ap-works-grid').innerHTML = '<div class="ap-loading">网络错误</div>';
         }
@@ -239,6 +268,7 @@
     function renderTags(el, tags) {
         var container = el.querySelector('.ap-tags-scroll');
         container.innerHTML = '';
+        stopTagsScroll();
         if (!tags.length) {
             el.querySelector('.ap-tags-section').style.display = 'none';
             return;
@@ -248,8 +278,79 @@
             var span = document.createElement('span');
             span.className = 'ap-tag';
             span.textContent = '#' + tag;
+            span.addEventListener('click', function (e) {
+                e.stopPropagation();
+                if (currentApp && currentApp.openTagPopup) {
+                    currentApp.openTagPopup(tag, currentAuthorId || '', e);
+                }
+            });
             container.appendChild(span);
         });
+
+        setTimeout(function () {
+            startTagsScroll(el.querySelector('.ap-tags-section'));
+        }, 800);
+    }
+
+    function startTagsScroll(section) {
+        stopTagsScroll();
+        var inner = section.querySelector('.ap-tags-scroll');
+        if (!inner) return;
+        var overflow = inner.scrollHeight - section.clientHeight;
+        if (overflow <= 2) return;
+
+        var paused = false;
+        section.addEventListener('touchstart', function () { paused = true; }, { passive: true });
+        section.addEventListener('touchend', function () { paused = false; }, { passive: true });
+        section.addEventListener('mouseenter', function () { paused = true; });
+        section.addEventListener('mouseleave', function () { paused = false; });
+
+        var offset = 0;
+        var direction = 1;
+        var pauseAt = 0;
+        var PAUSE_DURATION = 1500;
+        var SPEED = 0.5;
+
+        function tick() {
+            tagsScrollTimer = requestAnimationFrame(tick);
+            if (paused) return;
+
+            if (pauseAt > 0) {
+                pauseAt -= 16;
+                return;
+            }
+
+            overflow = inner.scrollHeight - section.clientHeight;
+            if (overflow <= 0) return;
+
+            if (direction === 1) {
+                offset += SPEED;
+                if (offset >= overflow) {
+                    offset = overflow;
+                    direction = -1;
+                    pauseAt = PAUSE_DURATION;
+                }
+            } else {
+                offset -= SPEED;
+                if (offset <= 0) {
+                    offset = 0;
+                    direction = 1;
+                    pauseAt = PAUSE_DURATION;
+                }
+            }
+
+            inner.style.transform = 'translateY(' + (-offset) + 'px)';
+        }
+
+        pauseAt = PAUSE_DURATION;
+        tagsScrollTimer = requestAnimationFrame(tick);
+    }
+
+    function stopTagsScroll() {
+        if (tagsScrollTimer) {
+            cancelAnimationFrame(tagsScrollTimer);
+            tagsScrollTimer = null;
+        }
     }
 
     function renderWorks(el, works) {
@@ -274,6 +375,7 @@
                 '<div class="ap-work-cover">' +
                     '<img src="' + coverUrl + '" loading="lazy" referrerpolicy="no-referrer">' +
                     (isVideo ? '<span class="ap-video-badge">▶</span>' : '') +
+                    '<span class="ap-work-link" data-note-id="' + (note.id || '') + '" title="查看原帖">🔗</span>' +
                 '</div>' +
                 '<div class="ap-work-info">' +
                     '<div class="ap-work-title">' + (note.title || '无标题') + '</div>' +
@@ -286,7 +388,25 @@
                     '</div>' +
                 '</div>';
 
-            card.onclick = function () {
+            card.onclick = function (e) {
+                var linkEl = e.target.closest('.ap-work-link');
+                if (linkEl) {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    var nid = linkEl.getAttribute('data-note-id');
+                    if (nid) {
+                        var deepLink = 'xhsdiscover://item/' + nid + '/';
+                        var webUrl = 'https://www.xiaohongshu.com/explore/' + nid;
+                        var start = Date.now();
+                        window.location.href = deepLink;
+                        setTimeout(function () {
+                            if (Date.now() - start < 1800) {
+                                window.open(webUrl, '_blank');
+                            }
+                        }, 1500);
+                    }
+                    return;
+                }
                 if (currentApp && currentApp.openNoteDetail) {
                     currentApp.openNoteDetail(note, card);
                 }
@@ -305,9 +425,14 @@
     }
 
     function close() {
+        stopTagsScroll();
         if (overlay) {
             overlay.classList.remove('ap-visible');
-            document.body.style.overflow = '';
+            setTimeout(function () {
+                if (!overlay.classList.contains('ap-visible')) {
+                    document.body.style.overflow = '';
+                }
+            }, 400);
         }
         currentAuthorId = null;
         currentApp = null;

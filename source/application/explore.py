@@ -44,7 +44,7 @@ class Explore:
         container["作品标题"] = data.safe_extract("title")
         container["作品描述"] = data.safe_extract("desc")
         container["作品类型"] = self.__classify_works(data)
-        # container["IP归属地"] = data.safe_extract("ipLocation")
+        container["IP归属地"] = data.safe_extract("ipLocation")
 
     def __extract_time(self, container: dict, data: Namespace):
         container["发布时间"] = (
@@ -70,6 +70,8 @@ class Explore:
         container["作者链接"] = (
             f"https://www.xiaohongshu.com/user/profile/{container['作者ID']}"
         )
+        container["作者头像"] = data.safe_extract("user.avatar")
+        container["作者IP归属地"] = data.safe_extract("user.ipLocation")
 
     @staticmethod
     def __classify_works(data: Namespace) -> str:

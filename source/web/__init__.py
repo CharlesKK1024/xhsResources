@@ -259,7 +259,6 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
                 xhs.manager.proxy = proxy
 
             result = await xhs.extract(url, download=False, data=True)
-
             if not result or not isinstance(result, list) or not result[0]:
                 return JSONResponse(
                     {"error": "无法获取作品数据，请检查链接或 Cookie"},
@@ -267,12 +266,18 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
                 )
 
             note = result[0]
-            
-            # 【调试代码】保存原始数据结构到文件，方便你查看
+
+            # 【调试代码】保存原始数据结构到文件
             try:
                 debug_path = Path("f:/AIcoding/XHSresources/xhsResources/debug_note.json")
+                debug_data = {
+                    "result_length": len(result),
+                    "note_keys": list(note.keys()) if isinstance(note, dict) else str(type(note)),
+                    "note": note,
+                    "full_result": result,
+                }
                 with open(debug_path, "w", encoding="utf-8") as f:
-                    json.dump(note, f, ensure_ascii=False, indent=4)
+                    json.dump(debug_data, f, ensure_ascii=False, indent=4)
                 print(f"DEBUG: 原始数据已保存至 {debug_path}")
             except Exception as e:
                 print(f"DEBUG: 保存失败 {e}")
@@ -298,7 +303,8 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
                 "images": _parse_images(note),
                 "videos": _parse_videos(note),
                 "cover": _get_cover(note),
-                "raw_cover": _get_cover(note), # 保留原始封面供移动端直连
+                "raw_cover": _get_cover(note),
+                "ipLocation": note.get("IP归属地", ""),
                 "url": url
             }
 
@@ -384,6 +390,52 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
         tags = payload.get("tags", "")
         await recorder.update_tags(note_id, tags)
         return {"status": "success"}
+
+    @app.get("/web/api/history/by-tag")
+    async def get_history_by_tag(
+        tag: str = Query(..., description="标签名"),
+        author_id: str = Query("", description="优先作者ID"),
+        token: str = Query("", description="用户令牌"),
+    ):
+        user_id = None
+        include_legacy = False
+        if token:
+            user_data = await recorder.get_user_by_token(token)
+            if user_data:
+                user_id = user_data["id"]
+                if user_data.get("nickname") == "龙哥":
+                    include_legacy = True
+        return await recorder.get_history_by_tag(tag, author_id, user_id, include_legacy)
+
+    @app.get("/web/api/history/by-location")
+    async def get_history_by_location(
+        location: str = Query(..., description="IP归属地省份名"),
+        token: str = Query("", description="用户令牌"),
+    ):
+        user_id = None
+        include_legacy = False
+        if token:
+            user_data = await recorder.get_user_by_token(token)
+            if user_data:
+                user_id = user_data["id"]
+                if user_data.get("nickname") == "龙哥":
+                    include_legacy = True
+        return await recorder.get_history_by_location(location, user_id, include_legacy)
+
+    @app.get("/web/api/history/location-stats")
+    async def get_location_stats(
+        token: str = Query("", description="用户令牌"),
+    ):
+        user_id = None
+        include_legacy = False
+        if token:
+            user_data = await recorder.get_user_by_token(token)
+            if user_data:
+                user_id = user_data["id"]
+                if user_data.get("nickname") == "龙哥":
+                    include_legacy = True
+        stats = await recorder.get_location_stats(user_id, include_legacy)
+        return {"stats": stats}
 
     @app.delete("/web/api/history/{note_id}")
     async def delete_history(note_id: str):
@@ -830,7 +882,23 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
                 user = await recorder.get_user_by_token(token)
                 if user:
                     user_id = user["id"]
-            await recorder.add_message(author_id, user_id, content)
+            msg_id = await recorder.add_message(author_id, user_id, content)
+            return {"status": "success", "id": msg_id}
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    @app.delete("/web/api/author/message/{message_id}")
+    async def delete_author_message(
+        message_id: int,
+        token: str = Query("", description="用户令牌"),
+    ):
+        try:
+            user_id = None
+            if token:
+                user_data = await recorder.get_user_by_token(token)
+                if user_data:
+                    user_id = user_data["id"]
+            await recorder.delete_message(message_id, user_id)
             return {"status": "success"}
         except Exception as e:
             return JSONResponse({"error": str(e)}, status_code=500)

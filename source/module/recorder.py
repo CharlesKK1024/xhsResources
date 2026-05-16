@@ -448,6 +448,113 @@ class WebRecorder(IDRecorder):
             for row in rows
         ]
 
+    async def get_history_by_tag(self, tag: str, author_id: str = None, user_id: int = None, include_legacy: bool = False):
+        query = "SELECT note_data, cache_time, is_starred, tags, author_id FROM web_history"
+        params = []
+        conditions = []
+
+        if user_id is not None:
+            if include_legacy:
+                conditions.append("(user_id = ? OR user_id IS NULL)")
+            else:
+                conditions.append("user_id = ?")
+            params.append(user_id)
+
+        conditions.append("note_data LIKE ?")
+        params.append(f"%{tag}%")
+
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+
+        query += " ORDER BY cache_time DESC"
+        await self.cursor.execute(query, tuple(params))
+        rows = await self.cursor.fetchall()
+
+        results = []
+        for row in rows:
+            data = json.loads(row[0])
+            tags_str = data.get("tags", "")
+            tag_list = [t.strip() for t in tags_str.replace("#", " ").split() if t.strip()]
+            if tag not in tag_list:
+                continue
+            results.append({
+                "data": data,
+                "cache_time": row[1],
+                "is_starred": bool(row[2]),
+                "tags": row[3].split(",") if row[3] else [],
+                "author_id": row[4] or "",
+            })
+
+        if author_id:
+            priority = [r for r in results if r["author_id"] == author_id]
+            others = [r for r in results if r["author_id"] != author_id]
+            results = priority + others
+
+        return results
+
+    async def get_history_by_location(self, location: str, user_id: int = None, include_legacy: bool = False):
+        query = "SELECT note_data, cache_time, is_starred, tags, author_id FROM web_history"
+        params = []
+        conditions = []
+
+        if user_id is not None:
+            if include_legacy:
+                conditions.append("(user_id = ? OR user_id IS NULL)")
+            else:
+                conditions.append("user_id = ?")
+            params.append(user_id)
+
+        conditions.append("note_data LIKE ?")
+        params.append(f'%"ipLocation": "{location}"%')
+
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+
+        query += " ORDER BY cache_time DESC"
+        await self.cursor.execute(query, tuple(params))
+        rows = await self.cursor.fetchall()
+
+        results = []
+        for row in rows:
+            data = json.loads(row[0])
+            if data.get("ipLocation") != location:
+                continue
+            results.append({
+                "data": data,
+                "cache_time": row[1],
+                "is_starred": bool(row[2]),
+                "tags": row[3].split(",") if row[3] else [],
+                "author_id": row[4] or "",
+            })
+        return results
+
+    async def get_location_stats(self, user_id: int = None, include_legacy: bool = False):
+        query = "SELECT note_data FROM web_history"
+        params = []
+        conditions = []
+
+        if user_id is not None:
+            if include_legacy:
+                conditions.append("(user_id = ? OR user_id IS NULL)")
+            else:
+                conditions.append("user_id = ?")
+            params.append(user_id)
+
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+
+        await self.cursor.execute(query, tuple(params))
+        rows = await self.cursor.fetchall()
+
+        stats = {}
+        for row in rows:
+            data = json.loads(row[0])
+            loc = data.get("ipLocation", "")
+            if loc:
+                stats[loc] = stats.get(loc, 0) + 1
+
+        return [{"name": k, "value": v} for k, v in sorted(stats.items(), key=lambda x: -x[1])]
+
     # ---- 用户管理 ----
     async def create_user(self, nickname: str, token: str, password_hash: str = '') -> dict:
         from datetime import datetime
@@ -559,6 +666,9 @@ class WebRecorder(IDRecorder):
             (author_id, user_id, content, is_self, created_at),
         )
         await self.database.commit()
+        await self.cursor.execute("SELECT last_insert_rowid()")
+        row = await self.cursor.fetchone()
+        return row[0] if row else None
 
     async def get_messages(self, author_id: str, user_id: int = None, limit: int = 100):
         query = "SELECT id, content, is_self, created_at FROM author_messages WHERE author_id = ?"
@@ -571,3 +681,12 @@ class WebRecorder(IDRecorder):
         await self.cursor.execute(query, tuple(params))
         rows = await self.cursor.fetchall()
         return [{"id": r[0], "content": r[1], "is_self": bool(r[2]), "time": r[3]} for r in rows]
+
+    async def delete_message(self, message_id: int, user_id: int = None):
+        query = "DELETE FROM author_messages WHERE id = ?"
+        params = [message_id]
+        if user_id is not None:
+            query += " AND user_id = ?"
+            params.append(user_id)
+        await self.database.execute(query, tuple(params))
+        await self.database.commit()

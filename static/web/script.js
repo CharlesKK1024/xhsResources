@@ -1,8 +1,12 @@
+window._overlayZCounter = 10000;
+window.nextOverlayZ = function() { return ++window._overlayZCounter; };
+
 class XHSWebUI {
     constructor() {
         this.currentNote = null;
         this.token = localStorage.getItem('xhs_token') || '';
         this.currentUser = null;
+        window.xhsApp = this;
         this.init();
     }
 
@@ -39,6 +43,7 @@ class XHSWebUI {
         this.previewSection = document.querySelector('.preview-section');
         this.scaleBtn = document.getElementById('scaleBtn');
         this.editModeToggle = document.getElementById('editModeToggle');
+        this.mapBtn = document.getElementById('mapBtn');
         this.cardScaler = document.getElementById('cardScaler');
         this.scaleRange = document.getElementById('scaleRange');
         this.scaleValue = document.getElementById('scaleValue');
@@ -126,7 +131,8 @@ class XHSWebUI {
         this.historyList = document.getElementById('historyList');
         this.historySearch = document.getElementById('historySearch');
         this.historySort = document.getElementById('historySort');
-        
+        this.tagPanelBtn = document.getElementById('tagPanelBtn');
+
         this.collectionList = document.getElementById('collectionList');
         this.collectionSearch = document.getElementById('collectionSearch');
         this.filterBtns = document.querySelectorAll('.filter-btn');
@@ -245,6 +251,10 @@ class XHSWebUI {
                 // 在主内容区添加/移除编辑模式类，控制删除按钮显隐
                 document.querySelector('.main-content').classList.toggle('edit-mode-active', this.isListEditMode);
             });
+        }
+
+        if (this.mapBtn) {
+            this.mapBtn.addEventListener('click', () => this.toggleMapPanel());
         }
 
         // 全景查看器事件
@@ -431,7 +441,10 @@ class XHSWebUI {
         // 搜索与排序
         this.historySearch.addEventListener('input', () => this.debounce(() => this.loadHistory(), 500)());
         this.historySort.addEventListener('change', () => this.loadHistory());
-        
+        if (this.tagPanelBtn) {
+            this.tagPanelBtn.addEventListener('click', () => this.openTagPanel());
+        }
+
         this.collectionSearch.addEventListener('input', () => this.debounce(() => this.loadCollections(), 500)());
 
         // iOS 剪贴板：Safari 任何 readText() 调用都会弹粘贴确认框
@@ -612,6 +625,11 @@ class XHSWebUI {
             }
         }
 
+        if (this.mapBtn) {
+            this.mapBtn.style.display = (targetId === 'history-page') ? 'flex' : 'none';
+            if (targetId !== 'history-page') this.closeMapPanel();
+        }
+
         if (targetId === 'history-page' && !this._historyLoaded) this.loadHistory();
         if (targetId === 'collection-page' && !this._collectionLoaded) this.loadCollections();
     }
@@ -709,7 +727,8 @@ class XHSWebUI {
         this._noteDetailSourceEl = sourceEl || null;
 
         const viewer = this.noteDetailViewer;
-        const coverImg = sourceEl && sourceEl.querySelector('.item-cover img');
+        viewer.style.zIndex = window.nextOverlayZ();
+        const coverImg = sourceEl && sourceEl.querySelector('.item-cover img, .ap-work-cover img');
         const _expandFromCard = !!coverImg;
         let _coverRect;
         if (_expandFromCard) _coverRect = coverImg.getBoundingClientRect();
@@ -729,7 +748,8 @@ class XHSWebUI {
 
         if (_expandFromCard) {
             _animEls.forEach(el => { el.style.opacity = '0'; el.style.transition = 'none'; });
-            this.noteMediaWrapper.style.visibility = 'hidden';
+            this.noteMediaWrapper.style.opacity = '0';
+            this.noteMediaWrapper.style.transition = 'none';
         }
 
         const isMobile = this.isIOS() || this.isAndroid();
@@ -760,12 +780,26 @@ class XHSWebUI {
                     .catch(() => {});
             }
         }
-        
+
+        // 点击头像/作者名进入作者主页
+        if (authorId && window.AuthorProfile) {
+            const authorName = note.author || '未知作者';
+            const openProfile = (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                window.AuthorProfile.open(authorId, authorName, this);
+            };
+            this.noteAvatar.style.cursor = 'pointer';
+            this.noteAvatar.onclick = openProfile;
+            this.noteAuthorName.style.cursor = 'pointer';
+            this.noteAuthorName.onclick = openProfile;
+        }
+
         // 原帖链接按钮
         const originalLinkBtn = document.getElementById('noteOriginalLink');
         if (originalLinkBtn) {
             const noteId = note.id;
-            const deepLink = `xhsdiscover://item/${noteId}`;
+            const deepLink = `xhsdiscover://item/${noteId}/`;
             const webUrl = `https://www.xiaohongshu.com/explore/${noteId}`;
             originalLinkBtn.onclick = (e) => {
                 e.stopPropagation();
@@ -1022,11 +1056,17 @@ class XHSWebUI {
                 const span = document.createElement('span');
                 span.className = 'note-tag';
                 span.textContent = `#${tag}`;
+                span.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.openTagPopup(tag, note.authorId || '', e);
+                });
                 this.noteDetailTags.appendChild(span);
             });
         }
 
-        this.noteDetailTime.textContent = note.time ? note.time.split(' ')[0] : '-';
+        const timeStr = note.time ? note.time.split(' ')[0] : '-';
+        const locStr = note.ipLocation ? '  📍' + note.ipLocation : '';
+        this.noteDetailTime.textContent = timeStr + locStr;
         this.noteLikeCount.textContent = this.formatNum(note.likeCount);
         this.noteCollectCount.textContent = this.formatNum(note.collectCount);
         this.noteCommentCount.textContent = this.formatNum(note.commentCount);
@@ -1037,14 +1077,16 @@ class XHSWebUI {
             const targetRect = mediaContainer.getBoundingClientRect();
             const dur = 380;
 
+            mediaContainer.style.backgroundColor = 'transparent';
+
             const clone = document.createElement('img');
             clone.src = coverImg.src;
             clone.referrerPolicy = 'no-referrer';
             Object.assign(clone.style, {
-                position: 'fixed', zIndex: '9999',
+                position: 'fixed', zIndex: String(window._overlayZCounter + 1),
                 left: _coverRect.left + 'px', top: _coverRect.top + 'px',
                 width: _coverRect.width + 'px', height: _coverRect.height + 'px',
-                objectFit: 'cover', background: '#1B1B1B',
+                objectFit: 'cover', background: 'transparent',
                 borderRadius: '8px', pointerEvents: 'none',
                 willChange: 'left, top, width, height',
                 transition: `left ${dur}ms cubic-bezier(0.25, 0.1, 0.25, 1), top ${dur}ms cubic-bezier(0.25, 0.1, 0.25, 1), width ${dur}ms cubic-bezier(0.25, 0.1, 0.25, 1), height ${dur}ms cubic-bezier(0.25, 0.1, 0.25, 1), border-radius ${dur}ms ease`,
@@ -1076,18 +1118,21 @@ class XHSWebUI {
             }, dur * 0.25);
 
             setTimeout(() => {
-                this.noteMediaWrapper.style.visibility = '';
-                clone.style.transition = 'opacity 120ms ease';
-                clone.style.opacity = '0';
-                setTimeout(() => {
-                    clone.remove();
-                    _animEls.forEach(el => {
-                        el.style.transition = '';
-                        el.style.opacity = '';
-                        el.style.transform = '';
-                    });
-                    viewer.style.transition = '';
-                }, 130);
+                clone.style.objectFit = 'contain';
+            }, dur - 80);
+
+            setTimeout(() => {
+                this.noteMediaWrapper.style.opacity = '1';
+                this.noteMediaWrapper.style.transition = '';
+                clone.remove();
+                mediaContainer.style.backgroundColor = '';
+                this.noteMediaWrapper.style.opacity = '';
+                _animEls.forEach(el => {
+                    el.style.transition = '';
+                    el.style.opacity = '';
+                    el.style.transform = '';
+                });
+                viewer.style.transition = '';
             }, dur);
         } else {
             viewer.offsetHeight;
@@ -1098,7 +1143,7 @@ class XHSWebUI {
 
     closeNoteDetail() {
         const source = this._noteDetailSourceEl;
-        const coverImg = source && source.querySelector('.item-cover img');
+        const coverImg = source && source.querySelector('.item-cover img, .ap-work-cover img');
         if (coverImg) {
             this.closeNoteDetailSwipe();
         } else {
@@ -1117,7 +1162,7 @@ class XHSWebUI {
         const dur = 350;
 
         const mediaContainer = viewer.querySelector('.note-media-container');
-        const coverImg = source && source.querySelector('.item-cover img');
+        const coverImg = source && source.querySelector('.item-cover img, .ap-work-cover img');
 
         if (mediaContainer && coverImg) {
             const imgRect = mediaContainer.getBoundingClientRect();
@@ -1132,71 +1177,32 @@ class XHSWebUI {
             clone.src = coverImg.src;
             clone.referrerPolicy = 'no-referrer';
             Object.assign(clone.style, {
-                position: 'fixed', zIndex: '9999',
+                position: 'fixed', zIndex: String(window._overlayZCounter + 1),
                 left: imgRect.left + 'px', top: imgRect.top + 'px',
                 width: imgRect.width + 'px', height: imgRect.height + 'px',
-                objectFit: 'cover', background: '#1B1B1B',
+                objectFit: 'cover', background: 'transparent',
                 borderRadius: viewer.style.borderRadius || '0',
                 pointerEvents: 'none',
                 willChange: 'left, top, width, height',
             });
             document.body.appendChild(clone);
 
-            viewer.style.transition = 'none';
-            viewer.style.transform = '';
-            viewer.style.borderRadius = '';
-            viewer.style.backgroundColor = 'transparent';
-            mediaContainer.style.opacity = '0';
-
-            const header = viewer.querySelector('.note-detail-header');
-            const footer = viewer.querySelector('.note-detail-footer');
-            const textContent = viewer.querySelector('.note-text-content');
-            const dots = viewer.querySelector('.note-media-dots');
-            const counter = viewer.querySelector('.note-media-counter');
-
-            if (header) {
-                header.style.transformOrigin = 'top center';
-                header.style.transition = `transform ${dur * 0.5}ms ease, opacity ${dur * 0.4}ms ease`;
-                header.style.transform = 'scaleY(0)';
-                header.style.opacity = '0';
-            }
-            if (footer) {
-                footer.style.transformOrigin = 'bottom center';
-                footer.style.transition = `transform ${dur * 0.5}ms ease, opacity ${dur * 0.4}ms ease`;
-                footer.style.transform = 'scaleY(0)';
-                footer.style.opacity = '0';
-            }
-            if (textContent) {
-                textContent.style.transformOrigin = 'bottom center';
-                textContent.style.transition = `transform ${dur * 0.5}ms ease, opacity ${dur * 0.4}ms ease`;
-                textContent.style.transform = 'scaleY(0)';
-                textContent.style.opacity = '0';
-            }
-            [dots, counter].filter(Boolean).forEach(el => {
-                el.style.transition = `opacity ${dur * 0.3}ms ease`;
-                el.style.opacity = '0';
-            });
+            viewer.style.display = 'none';
+            this._resetDetailStyles();
+            this.noteMediaWrapper.style.visibility = '';
+            this.noteMediaWrapper.style.opacity = '';
+            this.noteMediaWrapper.style.transition = '';
 
             clone.offsetHeight;
-            clone.style.transition = `left ${dur}ms cubic-bezier(0.4, 0, 0.2, 1), top ${dur}ms cubic-bezier(0.4, 0, 0.2, 1), width ${dur}ms cubic-bezier(0.4, 0, 0.2, 1), height ${dur}ms cubic-bezier(0.4, 0, 0.2, 1), border-radius ${dur}ms ease, background ${dur * 0.6}ms ease`;
+            clone.style.transition = `left ${dur}ms cubic-bezier(0.4, 0, 0.2, 1), top ${dur}ms cubic-bezier(0.4, 0, 0.2, 1), width ${dur}ms cubic-bezier(0.4, 0, 0.2, 1), height ${dur}ms cubic-bezier(0.4, 0, 0.2, 1), border-radius ${dur}ms ease`;
 
             Object.assign(clone.style, {
                 left: targetRect.left + 'px', top: targetRect.top + 'px',
                 width: targetRect.width + 'px', height: targetRect.height + 'px',
-                borderRadius: '8px', background: 'transparent',
+                borderRadius: '8px',
             });
 
-            const allEls = [header, footer, textContent, dots, counter, mediaContainer].filter(Boolean);
-            setTimeout(() => {
-                clone.remove();
-                viewer.style.display = 'none';
-                this._resetDetailStyles();
-                allEls.forEach(el => {
-                    el.style.transition = ''; el.style.opacity = '';
-                    el.style.transform = ''; el.style.transformOrigin = '';
-                });
-                this.noteMediaWrapper.style.visibility = '';
-            }, dur + 20);
+            setTimeout(() => { clone.remove(); }, dur + 20);
         } else {
             this._closeDetailFallback(viewer, dur);
         }
@@ -1802,12 +1808,17 @@ class XHSWebUI {
         const container = document.getElementById('tags');
         container.innerHTML = '';
         if (!tagsStr) return;
-        
+
         const tags = tagsStr.split(/[#\s]+/).filter(t => t.trim());
         tags.forEach(tag => {
             const span = document.createElement('span');
             span.className = 'tag';
             span.textContent = `#${tag}`;
+            span.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const authorId = this.currentNote?.authorId || '';
+                this.openTagPopup(tag, authorId, e);
+            });
             container.appendChild(span);
         });
     }
@@ -1989,14 +2000,499 @@ class XHSWebUI {
     async loadHistory() {
         const search = this.historySearch.value;
         const sort = this.historySort.value;
-        
+
         try {
             const resp = await fetch(`/web/api/history?search=${encodeURIComponent(search)}&sort=${sort}&token=${encodeURIComponent(this.token)}`);
             const data = await resp.json();
+            this._historyData = data;
+            this._historyActiveTag = null;
+            this._buildHistoryTagData(data);
             this.renderDataList(this.historyList, data, sort);
             this._historyLoaded = true;
         } catch (e) {
             console.error('加载历史失败', e);
+        }
+    }
+
+    _buildHistoryTagData(items) {
+        const tagCount = {};
+        items.forEach(item => {
+            const tags = item.data?.tags || '';
+            tags.split(/[#\s]+/).filter(t => t.trim()).forEach(t => {
+                tagCount[t] = (tagCount[t] || 0) + 1;
+            });
+        });
+        this._historyTagCount = tagCount;
+    }
+
+    openTagPanel() {
+        this.closeTagPanel();
+
+        const overlay = document.createElement('div');
+        overlay.className = 'tag-panel-overlay';
+
+        const panel = document.createElement('div');
+        panel.className = 'tag-panel';
+
+        const tagCount = this._historyTagCount || {};
+        const entries = Object.entries(tagCount);
+        const totalPosts = (this._historyData || []).length;
+        const totalTags = entries.length;
+        const sorted = [...entries].sort((a, b) => b[1] - a[1]);
+
+        // 头部
+        const header = document.createElement('div');
+        header.className = 'tag-panel-header';
+        header.innerHTML = `
+            <div class="tag-panel-title">🏷️ 标签集</div>
+            <span class="tag-panel-stats">${totalPosts} 篇作品 · ${totalTags} 个标签</span>
+            <button class="tag-panel-close">✕</button>
+        `;
+        panel.appendChild(header);
+
+        // 筛选按钮区
+        const filterBar = document.createElement('div');
+        filterBar.className = 'tag-panel-filter';
+
+        const allBtn = document.createElement('button');
+        allBtn.className = 'history-tag-btn' + (!this._historyActiveTag ? ' active' : '');
+        allBtn.textContent = '全部';
+        allBtn.addEventListener('click', () => {
+            this._historyActiveTag = null;
+            filterBar.querySelectorAll('.history-tag-btn').forEach(b => b.classList.remove('active'));
+            allBtn.classList.add('active');
+            this.renderDataList(this.historyList, this._historyData, this.historySort.value);
+        });
+        filterBar.appendChild(allBtn);
+
+        sorted.slice(0, 30).forEach(([tag, count]) => {
+            const btn = document.createElement('button');
+            btn.className = 'history-tag-btn' + (this._historyActiveTag === tag ? ' active' : '');
+            btn.dataset.tag = tag;
+            btn.textContent = `#${tag}`;
+            const badge = document.createElement('span');
+            badge.className = 'history-tag-count';
+            badge.textContent = count;
+            btn.appendChild(badge);
+            btn.addEventListener('click', () => {
+                this._historyActiveTag = tag;
+                filterBar.querySelectorAll('.history-tag-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                const filtered = this._historyData.filter(item => {
+                    const tags = (item.data?.tags || '').split(/[#\s]+/).filter(t => t.trim());
+                    return tags.includes(tag);
+                });
+                this.renderDataList(this.historyList, filtered, this.historySort.value);
+            });
+            filterBar.appendChild(btn);
+        });
+        const panelBody = document.createElement('div');
+        panelBody.className = 'tag-panel-body';
+        panelBody.appendChild(filterBar);
+
+        // 标签云（默认折叠，点击按钮展开）
+        if (entries.length) {
+            const cloudToggle = document.createElement('button');
+            cloudToggle.className = 'tag-cloud-toggle-btn';
+            cloudToggle.textContent = '📊 标签云 ▶';
+            panelBody.appendChild(cloudToggle);
+
+            const cloudBody = document.createElement('div');
+            cloudBody.className = 'tag-cloud-body tag-cloud-collapsed';
+
+            const maxCount = Math.max(...entries.map(e => e[1]));
+            const minCount = Math.min(...entries.map(e => e[1]));
+            const colors = ['#e8a87c', '#85dcb8', '#f7a5a5', '#a5c4f7', '#d4a5f7', '#f7d6a5', '#a5f7e8', '#f7a5d4'];
+            const shuffled = [...entries].sort(() => Math.random() - 0.5);
+
+            shuffled.forEach(([tag, count]) => {
+                const ratio = maxCount === minCount ? 0.5 : (count - minCount) / (maxCount - minCount);
+                const fontSize = 1.2 + ratio * 2.3;
+                const color = colors[Math.floor(Math.random() * colors.length)];
+
+                const span = document.createElement('span');
+                span.className = 'tag-cloud-item';
+                span.textContent = `#${tag}`;
+                span.style.fontSize = fontSize + 'vh';
+                span.style.color = color;
+                span.title = `${count} 篇`;
+                span.addEventListener('click', () => {
+                    this._historyActiveTag = tag;
+                    filterBar.querySelectorAll('.history-tag-btn').forEach(b => {
+                        b.classList.toggle('active', b.dataset.tag === tag);
+                    });
+                    const filtered = this._historyData.filter(item => {
+                        const tags = (item.data?.tags || '').split(/[#\s]+/).filter(t => t.trim());
+                        return tags.includes(tag);
+                    });
+                    this.renderDataList(this.historyList, filtered, this.historySort.value);
+                    this.closeTagPanel();
+                });
+                cloudBody.appendChild(span);
+            });
+            panelBody.appendChild(cloudBody);
+
+            cloudToggle.addEventListener('click', () => {
+                const isOpen = !cloudBody.classList.contains('tag-cloud-collapsed');
+                cloudBody.classList.toggle('tag-cloud-collapsed', !isOpen);
+                cloudToggle.textContent = isOpen ? '📊 标签云 ▶' : '📊 标签云 ▼';
+            });
+        }
+
+        panel.appendChild(panelBody);
+        overlay.appendChild(panel);
+        document.body.appendChild(overlay);
+        this._tagPanelOverlay = overlay;
+
+        // 阻止触摸穿透到背景
+        overlay.addEventListener('touchmove', (e) => {
+            if (e.target === overlay) {
+                e.preventDefault();
+            }
+        }, { passive: false });
+
+        // 动画入场
+        requestAnimationFrame(() => {
+            overlay.classList.add('visible');
+            panel.classList.add('visible');
+        });
+        document.body.style.overflow = 'hidden';
+
+        // 关闭事件
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) this.closeTagPanel();
+        });
+        header.querySelector('.tag-panel-close').addEventListener('click', () => this.closeTagPanel());
+        this._tagPanelEscHandler = (e) => {
+            if (e.key === 'Escape') this.closeTagPanel();
+        };
+        document.addEventListener('keydown', this._tagPanelEscHandler);
+    }
+
+    closeTagPanel() {
+        if (this._tagPanelOverlay) {
+            const panel = this._tagPanelOverlay.querySelector('.tag-panel');
+            this._tagPanelOverlay.classList.remove('visible');
+            if (panel) panel.classList.remove('visible');
+            document.body.style.overflow = '';
+            setTimeout(() => {
+                this._tagPanelOverlay?.remove();
+                this._tagPanelOverlay = null;
+            }, 350);
+        }
+        if (this._tagPanelEscHandler) {
+            document.removeEventListener('keydown', this._tagPanelEscHandler);
+            this._tagPanelEscHandler = null;
+        }
+    }
+
+    // ====== 地图统计面板 ======
+
+    toggleMapPanel() {
+        if (this._mapPanel) {
+            this.closeMapPanel();
+        } else {
+            this.openMapPanel();
+        }
+    }
+
+    async openMapPanel() {
+        if (this._mapPanel) return;
+
+        const mainContent = document.querySelector('.main-content');
+        const panel = document.createElement('div');
+        panel.className = 'map-panel';
+        panel.innerHTML = `
+            <div class="map-panel-header">
+                <div>
+                    <span class="map-panel-title">🌍 IP归属地分布</span>
+                    <span class="map-panel-stats"></span>
+                </div>
+                <button class="map-panel-close">✕</button>
+            </div>
+            <div class="map-chart-container"></div>
+        `;
+
+        const historyPage = document.getElementById('history-page');
+        mainContent.insertBefore(panel, historyPage);
+        this._mapPanel = panel;
+
+        panel.querySelector('.map-panel-close').addEventListener('click', () => this.closeMapPanel());
+
+        requestAnimationFrame(() => panel.classList.add('visible'));
+
+        await this.renderMap(panel);
+    }
+
+    closeMapPanel() {
+        if (!this._mapPanel) return;
+        if (this._mapChart) {
+            this._mapChart.dispose();
+            this._mapChart = null;
+        }
+        this._mapPanel.classList.remove('visible');
+        setTimeout(() => {
+            this._mapPanel?.remove();
+            this._mapPanel = null;
+        }, 450);
+    }
+
+    async renderMap(panel) {
+        const chartDom = panel.querySelector('.map-chart-container');
+        const statsEl = panel.querySelector('.map-panel-stats');
+
+        try {
+            const resp = await fetch(`/web/api/history/location-stats?token=${encodeURIComponent(this.token)}`);
+            if (!resp.ok) throw new Error('请求失败');
+            const result = await resp.json();
+            const data = result.stats || [];
+
+            if (!data.length) {
+                chartDom.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary)">暂无IP归属地数据</div>';
+                return;
+            }
+
+            const totalPosts = data.reduce((s, d) => s + d.value, 0);
+            statsEl.textContent = `${totalPosts} 篇作品 · ${data.length} 个地区`;
+
+            const isDark = document.documentElement.getAttribute('data-theme') !== 'light';
+            const chart = echarts.init(chartDom, isDark ? 'dark' : null);
+            this._mapChart = chart;
+
+            chart.getZr().dom.style.backgroundColor = 'transparent';
+            if (isDark) chart.getZr().dom.style.backgroundColor = 'transparent';
+
+            const mapFeatures = echarts.getMap('china').geoJson.features;
+            const geoCoordMap = {};
+            mapFeatures.forEach(v => {
+                geoCoordMap[v.properties.name] = v.properties.cp;
+            });
+
+            const convertData = (data) => {
+                const res = [];
+                for (let i = 0; i < data.length; i++) {
+                    const geoCoord = geoCoordMap[data[i].name];
+                    if (geoCoord) {
+                        res.push({ name: data[i].name, value: geoCoord.concat(data[i].value) });
+                    }
+                }
+                return res;
+            };
+
+            const maxVal = Math.max(...data.map(d => d.value));
+            const minVal = Math.min(...data.map(d => d.value));
+
+            const areaColor = isDark ? '#031525' : '#e0e8f0';
+            const borderColor = isDark ? '#3B5077' : '#8fa8c8';
+            const emphasisColor = isDark ? '#2B91B7' : '#5dade2';
+            const textColor = isDark ? '#05C3F9' : '#2c3e50';
+
+            chart.setOption({
+                backgroundColor: 'transparent',
+                tooltip: {
+                    trigger: 'item',
+                    formatter: (params) => {
+                        const val = Array.isArray(params.value) ? params.value[2] : params.value;
+                        if (!val && val !== 0) return '';
+                        return `${params.name}<br/>帖子数: <b>${val}</b>`;
+                    }
+                },
+                visualMap: {
+                    show: true,
+                    min: 0,
+                    max: Math.max(maxVal, 10),
+                    left: 'left',
+                    top: 'bottom',
+                    text: ['多', '少'],
+                    calculable: true,
+                    seriesIndex: [1],
+                    inRange: {
+                        color: isDark ? ['#00467F', '#A5CC82'] : ['#b3d9ff', '#2980b9']
+                    },
+                    textStyle: { color: isDark ? '#ddd' : '#333' }
+                },
+                geo: {
+                    show: true,
+                    map: 'china',
+                    label: { show: false, emphasis: { show: false } },
+                    roam: true,
+                    itemStyle: {
+                        areaColor: areaColor,
+                        borderColor: borderColor,
+                    },
+                    emphasis: {
+                        itemStyle: { areaColor: emphasisColor }
+                    }
+                },
+                series: [
+                    {
+                        name: '散点',
+                        type: 'scatter',
+                        coordinateSystem: 'geo',
+                        data: convertData(data),
+                        symbolSize: (val) => Math.max(val[2] / (maxVal / 30), 4),
+                        label: {
+                            show: true,
+                            formatter: '{b}',
+                            position: 'right',
+                            color: textColor,
+                            fontSize: 10
+                        },
+                        itemStyle: { color: textColor }
+                    },
+                    {
+                        type: 'map',
+                        map: 'china',
+                        geoIndex: 0,
+                        aspectScale: 0.75,
+                        showLegendSymbol: false,
+                        label: { show: false, emphasis: { show: false } },
+                        roam: true,
+                        itemStyle: {
+                            areaColor: areaColor,
+                            borderColor: borderColor,
+                        },
+                        emphasis: {
+                            itemStyle: { areaColor: emphasisColor }
+                        },
+                        animation: false,
+                        data: data
+                    },
+                    {
+                        name: '气泡',
+                        type: 'scatter',
+                        coordinateSystem: 'geo',
+                        symbol: 'pin',
+                        symbolSize: (val) => {
+                            if (maxVal === minVal) return 40;
+                            const a = (80 - 20) / (maxVal - minVal);
+                            return a * (val[2] - minVal) + 20;
+                        },
+                        label: {
+                            show: true,
+                            formatter: (p) => Math.round(p.value[2]),
+                            color: '#fff',
+                            fontSize: 9
+                        },
+                        itemStyle: { color: '#F62157' },
+                        zlevel: 6,
+                        data: convertData(data),
+                    },
+                    {
+                        name: 'Top 5',
+                        type: 'effectScatter',
+                        coordinateSystem: 'geo',
+                        data: convertData([...data].sort((a, b) => b.value - a.value).slice(0, 5)),
+                        symbolSize: (val) => Math.max(val[2] / (maxVal / 30), 6),
+                        showEffectOn: 'render',
+                        rippleEffect: { brushType: 'stroke' },
+                        label: {
+                            show: true,
+                            formatter: '{b}',
+                            position: 'right',
+                            color: isDark ? 'yellow' : '#e67e22',
+                            fontSize: 11,
+                            fontWeight: 'bold'
+                        },
+                        itemStyle: {
+                            color: isDark ? 'yellow' : '#e67e22',
+                            shadowBlur: 10,
+                            shadowColor: isDark ? 'yellow' : '#e67e22'
+                        },
+                        zlevel: 1
+                    }
+                ]
+            });
+
+            chart.on('click', (params) => {
+                const name = params.name;
+                if (!name) return;
+                const hasData = data.some(d => d.name === name && d.value > 0);
+                if (hasData) {
+                    this.openLocationPopup(name);
+                }
+            });
+
+            window.addEventListener('resize', () => chart.resize(), { once: false });
+
+        } catch (e) {
+            chartDom.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary)">加载地图数据失败</div>';
+        }
+    }
+
+    async openLocationPopup(location) {
+        this.closeTagPopup();
+
+        const overlay = document.createElement('div');
+        overlay.className = 'tag-popup-overlay';
+        const popup = document.createElement('div');
+        popup.className = 'tag-popup';
+        popup.style.position = 'fixed';
+        popup.style.right = '4vw';
+        popup.style.top = '50%';
+        popup.style.transform = 'translateY(-50%)';
+        popup.style.left = 'auto';
+        popup.style.minHeight = '20vh';
+        popup.innerHTML = `
+            <div class="tag-popup-header">
+                <div>
+                    <span class="tag-popup-title">📍 ${location}</span>
+                    <span class="tag-popup-count"></span>
+                </div>
+                <button class="tag-popup-close">✕</button>
+            </div>
+            <div class="tag-popup-body">
+                <div class="tag-popup-loading">加载中...</div>
+            </div>
+        `;
+        overlay.appendChild(popup);
+        document.body.appendChild(overlay);
+        this._tagPopupOverlay = overlay;
+
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) this.closeTagPopup();
+        });
+        popup.querySelector('.tag-popup-close').addEventListener('click', () => this.closeTagPopup());
+        this._tagPopupEscHandler = (e) => { if (e.key === 'Escape') this.closeTagPopup(); };
+        document.addEventListener('keydown', this._tagPopupEscHandler);
+
+        try {
+            const resp = await fetch(`/web/api/history/by-location?location=${encodeURIComponent(location)}&token=${encodeURIComponent(this.token)}`);
+            const items = await resp.json();
+            const body = popup.querySelector('.tag-popup-body');
+            popup.querySelector('.tag-popup-count').textContent = `${items.length} 篇作品`;
+
+            if (!items.length) {
+                body.innerHTML = '<div class="tag-popup-empty">暂无相关作品</div>';
+                return;
+            }
+
+            body.innerHTML = '';
+            items.forEach(item => {
+                const note = item.data;
+                if (!note) return;
+                const coverUrl = this.getMediaUrl(note.cover || note.raw_cover || '');
+                const div = document.createElement('div');
+                div.className = 'tag-popup-item';
+                div.innerHTML = `
+                    <img class="tag-popup-cover" src="${coverUrl}" loading="lazy" referrerpolicy="no-referrer">
+                    <div class="tag-popup-info">
+                        <div class="tag-popup-item-title">${note.title || '无标题'}</div>
+                        <div class="tag-popup-item-author">👤 ${note.author || ''}</div>
+                        <div class="tag-popup-item-stats">
+                            <span>❤️ ${this.formatNum(note.likeCount)}</span>
+                            <span>⭐ ${this.formatNum(note.collectCount)}</span>
+                        </div>
+                    </div>
+                `;
+                div.addEventListener('click', () => {
+                    this.closeTagPopup();
+                    this.openNoteDetail(note);
+                });
+                body.appendChild(div);
+            });
+        } catch (e) {
+            popup.querySelector('.tag-popup-body').innerHTML = '<div class="tag-popup-empty">加载失败</div>';
         }
     }
 
@@ -2319,11 +2815,16 @@ class XHSWebUI {
                     this.showUserWidget(user);
                     return;
                 }
+                if (resp.status === 401 || resp.status === 403) {
+                    localStorage.removeItem('xhs_token');
+                    this.token = '';
+                    this.showLogin();
+                    return;
+                }
             } catch (e) {
-                console.warn('Token 验证失败，重新登录');
+                console.warn('网络异常，保持当前登录状态');
             }
-            localStorage.removeItem('xhs_token');
-            this.token = '';
+            return;
         }
         this.showLogin();
     }
@@ -2331,14 +2832,23 @@ class XHSWebUI {
     showLogin() {
         if (this.loginModal) {
             this.loginModal.style.display = 'flex';
-            this.loginNickname.value = '';
-            this.loginPassword.value = '';
+            const rememberBox = document.getElementById('loginRemember');
+            const saved = JSON.parse(localStorage.getItem('xhs_remember') || 'null');
+            if (saved && rememberBox) {
+                this.loginNickname.value = saved.nickname || '';
+                this.loginPassword.value = saved.password || '';
+                rememberBox.checked = true;
+            } else {
+                this.loginNickname.value = '';
+                this.loginPassword.value = '';
+                if (rememberBox) rememberBox.checked = false;
+            }
             if (this.loginError) this.loginError.style.display = 'none';
             this.loginPassword.type = 'password';
             if (this.loginPasswordToggle) this.loginPasswordToggle.textContent = '👁️';
             this.loginBtn.textContent = '登录';
             this.loginBtn.disabled = false;
-            this.loginNickname.focus();
+            if (!saved) this.loginNickname.focus();
         }
     }
 
@@ -2378,6 +2888,12 @@ class XHSWebUI {
             this.token = user.token;
             this.userTheme = user.theme || 'dark';
             localStorage.setItem('xhs_token', user.token);
+            const rememberBox = document.getElementById('loginRemember');
+            if (rememberBox && rememberBox.checked) {
+                localStorage.setItem('xhs_remember', JSON.stringify({ nickname, password }));
+            } else {
+                localStorage.removeItem('xhs_remember');
+            }
             this.applyUserTheme();
             this.showUserWidget(user);
             this.loginModal.style.display = 'none';
@@ -2756,6 +3272,152 @@ class XHSWebUI {
 
         // 第三步：自动触发查询
         await this.fetchNote();
+    }
+
+    // ---- 标签弹窗 ----
+
+    async openTagPopup(tag, authorId, clickEvent) {
+        this.closeTagPopup();
+
+        const overlay = document.createElement('div');
+        overlay.className = 'tag-popup-overlay';
+
+        const popup = document.createElement('div');
+        popup.className = 'tag-popup';
+
+        popup.innerHTML = `
+            <div class="tag-popup-header">
+                <div>
+                    <span class="tag-popup-title">#${tag}</span>
+                    <span class="tag-popup-count"></span>
+                </div>
+                <button class="tag-popup-close">✕</button>
+            </div>
+            <div class="tag-popup-body">
+                <div class="tag-popup-loading">加载中...</div>
+            </div>
+        `;
+
+        overlay.appendChild(popup);
+        document.body.appendChild(overlay);
+        this._tagPopupOverlay = overlay;
+
+        // 定位：在点击标签的下方
+        const rect = clickEvent.target.getBoundingClientRect();
+        let top = rect.bottom + 8;
+        let left = rect.left;
+
+        // 边界修正
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        const popupWidth = vw <= 768 ? vw * 0.88 : vw * 0.42;
+        if (left + popupWidth > vw - 16) left = vw - popupWidth - 16;
+        if (left < 8) left = 8;
+        if (top + vh * 0.6 > vh - 16) top = Math.max(16, rect.top - vh * 0.6 - 8);
+
+        popup.style.top = top + 'px';
+        popup.style.left = left + 'px';
+
+        // 关闭事件
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) this.closeTagPopup();
+        });
+        popup.querySelector('.tag-popup-close').addEventListener('click', () => this.closeTagPopup());
+        this._tagPopupEscHandler = (e) => {
+            if (e.key === 'Escape') this.closeTagPopup();
+        };
+        document.addEventListener('keydown', this._tagPopupEscHandler);
+
+        // 请求数据
+        try {
+            const params = new URLSearchParams({
+                tag,
+                author_id: authorId,
+                token: this.token || ''
+            });
+            const resp = await fetch(`/web/api/history/by-tag?${params}`);
+            const items = await resp.json();
+
+            const body = popup.querySelector('.tag-popup-body');
+            const countEl = popup.querySelector('.tag-popup-count');
+            countEl.textContent = `${items.length} 篇相关`;
+
+            if (!items.length) {
+                body.innerHTML = '<div class="tag-popup-empty">暂无相关作品</div>';
+                return;
+            }
+
+            body.innerHTML = '';
+            items.forEach(item => {
+                const note = item.data;
+                if (!note) return;
+                const isCurrent = item.author_id === authorId;
+
+                const el = document.createElement('div');
+                el.className = 'tag-popup-item' + (isCurrent ? ' is-current-author' : '');
+
+                const coverImg = document.createElement('img');
+                coverImg.className = 'tag-popup-cover';
+                coverImg.src = this.getMediaUrl(note.cover);
+                coverImg.loading = 'lazy';
+                coverImg.referrerPolicy = 'no-referrer';
+                el.appendChild(coverImg);
+
+                const info = document.createElement('div');
+                info.className = 'tag-popup-info';
+                info.innerHTML = `
+                    <div class="tag-popup-item-title">${note.title || '无标题'}</div>
+                    <div class="tag-popup-item-author">👤 ${note.author || '未知'}</div>
+                    <div class="tag-popup-item-stats">
+                        <span>❤️ ${this.formatNum(note.likeCount)}</span>
+                        <span>⭐ ${this.formatNum(note.collectCount)}</span>
+                    </div>
+                `;
+
+                if (note.tags) {
+                    const tagsDiv = document.createElement('div');
+                    tagsDiv.className = 'tag-popup-item-tags';
+                    const noteTags = note.tags.split(/[#\s]+/).filter(t => t.trim());
+                    noteTags.forEach(t => {
+                        const tagSpan = document.createElement('span');
+                        tagSpan.className = 'tag-popup-tag' + (t === tag ? ' current-tag' : '');
+                        tagSpan.textContent = '#' + t;
+                        if (t !== tag) {
+                            tagSpan.addEventListener('click', (e) => {
+                                e.stopPropagation();
+                                this.closeTagPopup();
+                                this.openTagPopup(t, authorId, e);
+                            });
+                        }
+                        tagsDiv.appendChild(tagSpan);
+                    });
+                    info.appendChild(tagsDiv);
+                }
+
+                el.appendChild(info);
+
+                el.addEventListener('click', () => {
+                    this.closeTagPopup();
+                    this.openNoteDetail(note);
+                });
+
+                body.appendChild(el);
+            });
+        } catch (err) {
+            const body = popup.querySelector('.tag-popup-body');
+            body.innerHTML = '<div class="tag-popup-empty">加载失败</div>';
+        }
+    }
+
+    closeTagPopup() {
+        if (this._tagPopupOverlay) {
+            this._tagPopupOverlay.remove();
+            this._tagPopupOverlay = null;
+        }
+        if (this._tagPopupEscHandler) {
+            document.removeEventListener('keydown', this._tagPopupEscHandler);
+            this._tagPopupEscHandler = null;
+        }
     }
 }
 

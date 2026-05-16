@@ -432,6 +432,16 @@ class XHS:
             self.logging(_("{0} 提取数据失败").format(id_), ERROR)
             count.fail += 1
             return {}
+        # 保存原始 Namespace 数据供调试
+        try:
+            raw = namespace.__dict__
+            from pathlib import Path
+            import json
+            debug_raw = Path("f:/AIcoding/XHSresources/xhsResources/debug_raw_namespace.json")
+            with open(debug_raw, "w", encoding="utf-8") as f:
+                json.dump(raw, f, ensure_ascii=False, indent=4, default=str)
+        except Exception:
+            pass
         return data
 
     async def _deal_download_tasks(
