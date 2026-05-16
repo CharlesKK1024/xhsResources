@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "xhs-web",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "main.py", "WEB"],
+      "port": 5008
+    }
+  ]
+}

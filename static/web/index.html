@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
     />
     <meta name="referrer" content="no-referrer" />
     <title>XHS-Downloader Web</title>
@@ -36,6 +36,7 @@
 
       <!-- 顶部操作栏 -->
       <div class="top-header-actions">
+        <button id="pageRefreshBtn" class="action-btn refresh-page-btn" title="刷新页面">🔄</button>
         <!-- 用户信息 -->
         <div id="userWidget" class="user-widget" style="display: none">
           <div class="user-avatar-wrap">
@@ -44,6 +45,16 @@
           <div class="user-nameplate">
             <span id="userNickname" class="user-nickname"></span>
           </div>
+        </div>
+        <!-- 作品集搜索/排序 (仅作品集页面显示) -->
+        <div id="historyControls" class="header-sub-row">
+          <span class="header-page-title">作品集</span>
+          <input type="text" id="historySearch" class="header-search" placeholder="搜索..." />
+          <select id="historySort" class="header-sort">
+            <option value="time_desc">新→旧</option>
+            <option value="time_asc">旧→新</option>
+            <option value="author">按作者</option>
+          </select>
         </div>
         <div id="cardScaler" class="scaler-popup" style="display: none">
           <span class="scaler-label">卡片缩放</span>
@@ -68,23 +79,27 @@
       </div>
 
       <main class="main-content">
+        <!-- 快速滚动导轨 -->
+        <div id="scrollRail" class="scroll-rail">
+          <div class="scroll-rail-track">
+            <div class="scroll-rail-thumb"></div>
+          </div>
+        </div>
         <!-- 提取页面 -->
         <section id="extract-page" class="page">
-          <header class="page-header">
-            <h2>提取作品</h2>
-            <p class="subtitle">小红书作品在线提取工具</p>
-          </header>
-
           <div class="input-section">
             <div class="input-group">
-              <input
-                type="text"
+              <textarea
                 id="urlInput"
                 placeholder="粘贴小红书作品链接..."
                 class="url-input"
-              />
+                rows="2"
+              ></textarea>
             </div>
             <div class="button-group">
+              <button id="pasteBtn" class="paste-btn">
+                <span class="btn-icon">📋</span> 粘贴链接
+              </button>
               <button id="clearBtn" class="clear-btn">
                 <span class="btn-icon">🧹</span> 一键清空
               </button>
@@ -100,13 +115,15 @@
             >
               <span class="btn-icon">🔄</span>
             </button>
+            <div id="detectedLinks" class="detected-links" style="display: none"></div>
           </div>
 
-          <div id="loading" class="loading" style="display: none">
-            <!-- 由 tools.js 动态生成 -->
-          </div>
+          <div class="extract-scroll-area">
+            <div id="loading" class="loading" style="display: none">
+              <!-- 由 tools.js 动态生成 -->
+            </div>
 
-          <div id="result" class="result" style="display: none">
+            <div id="result" class="result" style="display: none">
             <div class="result-header">
               <h2>作品预览</h2>
               <div class="result-actions">
@@ -161,27 +178,11 @@
               <div id="previewList" class="preview-list"></div>
             </div>
           </div>
+          </div>
         </section>
 
         <!-- 作品集页面 -->
         <section id="history-page" class="page active">
-          <header class="page-header">
-            <h2>作品集</h2>
-            <div class="header-actions">
-              <div class="search-box">
-                <input
-                  type="text"
-                  id="historySearch"
-                  placeholder="搜索标题、作者、标签..."
-                />
-              </div>
-              <select id="historySort" class="sort-select">
-                <option value="time_desc">获取时间 (新→旧)</option>
-                <option value="time_asc">获取时间 (旧→新)</option>
-                <option value="author">按作者分组</option>
-              </select>
-            </div>
-          </header>
           <div id="historyList" class="data-list">
             <!-- 动态生成 -->
           </div>
@@ -307,7 +308,7 @@
     <div id="noteDetailViewer" class="note-detail-viewer" style="display: none">
       <div class="note-detail-header">
         <div class="note-detail-author">
-          <button class="note-detail-back">✕</button>
+          <button class="note-detail-back">‹</button>
           <img id="noteAvatar" src="" class="note-avatar" />
           <span id="noteAuthorName" class="note-author-name"></span>
         </div>
@@ -322,8 +323,8 @@
             <!-- 动态生成图片/视频 -->
           </div>
           <div id="noteMediaCounter" class="note-media-counter">1/1</div>
-          <div id="noteMediaDots" class="note-media-dots"></div>
         </div>
+        <div id="noteMediaDots" class="note-media-dots"></div>
         <div class="note-text-content">
           <h2 id="noteDetailTitle" class="note-title"></h2>
           <p id="noteDetailDesc" class="note-desc"></p>

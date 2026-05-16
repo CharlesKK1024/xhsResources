@@ -22,6 +22,8 @@ class XHSWebUI {
         this.urlInput = document.getElementById('urlInput');
         this.fetchBtn = document.getElementById('fetchBtn');
         this.clearBtn = document.getElementById('clearBtn');
+        this.pasteBtn = document.getElementById('pasteBtn');
+        this.detectedLinksEl = document.getElementById('detectedLinks');
         this.refreshBtn = document.getElementById('refreshBtn');
         this.loading = document.getElementById('loading');
         if (this.loading && window.generateLoadingWave) {
@@ -133,6 +135,22 @@ class XHSWebUI {
         this.bindEvents();
         this.loadTheme();
         this.loadInitialData();
+        this._initScrollRail();
+        this._fixIOSInputZoom();
+
+        // 作品集页面默认展开子栏
+        const historyControls = document.getElementById('historyControls');
+        const activeNav = document.querySelector('.nav-item.active');
+        if (historyControls && activeNav && activeNav.dataset.target === 'history-page') {
+            historyControls.classList.add('visible');
+            document.querySelector('.main-content').classList.add('header-expanded');
+        }
+
+        // 刷新按钮
+        const refreshPageBtn = document.getElementById('pageRefreshBtn');
+        if (refreshPageBtn) {
+            refreshPageBtn.addEventListener('click', () => location.reload());
+        }
     }
 
     bindEvents() {
@@ -146,12 +164,56 @@ class XHSWebUI {
         // 提取功能
         this.clearBtn.addEventListener('click', () => {
             this.urlInput.value = '';
+            this.renderDetectedLinks([]);
             this.urlInput.focus();
         });
         this.fetchBtn.addEventListener('click', () => this.fetchNote(false));
         this.refreshBtn.addEventListener('click', () => this.fetchNote(true));
         this.urlInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') this.fetchNote(false);
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                this.fetchNote(false);
+            }
+        });
+        this.urlInput.addEventListener('input', () => this.detectAndRenderLinks());
+        this.urlInput.addEventListener('paste', () => {
+            setTimeout(() => {
+                const links = this.detectLinks();
+                this.renderDetectedLinks(links);
+                if (links.length === 1 && !this._hadContentBeforePaste) {
+                    this.fetchNote(false);
+                }
+            }, 50);
+        });
+        this.urlInput.addEventListener('beforeinput', (e) => {
+            if (e.inputType === 'insertFromPaste') {
+                this._hadContentBeforePaste = this.urlInput.value.trim().length > 0;
+            }
+        });
+        this.pasteBtn.addEventListener('click', async () => {
+            try {
+                const text = await navigator.clipboard.readText();
+                if (!text || !text.trim()) return;
+                const existingLinks = this.detectLinks();
+                const newRegex = /https?:\/\/[^\s)>"']*(?:xiaohongshu|xhslink)\.com[^\s)>"']*/gi;
+                const newUrls = text.match(newRegex) || [];
+                const dupes = newUrls.filter(u => existingLinks.includes(u));
+                if (dupes.length > 0 && newUrls.length === dupes.length) {
+                    if (window.showToast) window.showToast('链接已存在，跳过重复');
+                    return;
+                }
+                const current = this.urlInput.value;
+                this.urlInput.value = current ? current + '\n' + text.trim() : text.trim();
+                this.detectAndRenderLinks();
+                const links = this.detectLinks();
+                if (dupes.length > 0) {
+                    if (window.showToast) window.showToast(`已添加，${dupes.length} 个重复链接已自动去重`);
+                } else if (links.length > 0) {
+                    if (window.showToast) window.showToast(`已添加 ${newUrls.length} 个链接`);
+                }
+            } catch (err) {
+                if (window.showToast) window.showToast('无法读取剪贴板');
+            }
         });
         
         this.copyBtn.addEventListener('click', () => this.copyLinks());
@@ -197,70 +259,91 @@ class XHSWebUI {
         
         // 笔记详情事件
         this.noteDetailBack.onclick = () => this.closeNoteDetail();
-        
-        // 笔记详情：下拉关闭手势
+
+        // 笔记详情：下拉关闭 + 右滑缩小关闭
         let detailTouchStartY = 0;
         let detailTouchStartX = 0;
-        let isPullingDown = false;
-        
+        let detailGesture = '';
+
         this.noteDetailViewer.addEventListener('touchstart', (e) => {
-            // 只有当内容区域滚动到顶部时，才允许触发下拉关闭
-            const content = this.noteDetailViewer.querySelector('.note-detail-content');
-            if (content.scrollTop <= 0) {
-                detailTouchStartY = e.touches[0].clientY;
-                detailTouchStartX = e.touches[0].clientX;
-                isPullingDown = true;
-                this.noteDetailViewer.style.transition = 'none';
-            } else {
-                isPullingDown = false;
-            }
+            const touch = e.touches[0];
+            detailTouchStartY = touch.clientY;
+            detailTouchStartX = touch.clientX;
+            detailGesture = '';
+            this.noteDetailViewer.style.transition = 'none';
         }, { passive: true });
 
         this.noteDetailViewer.addEventListener('touchmove', (e) => {
-            if (!isPullingDown) return;
-            
-            const currentY = e.touches[0].clientY;
-            const currentX = e.touches[0].clientX;
-            const diffY = currentY - detailTouchStartY;
-            const diffX = Math.abs(currentX - detailTouchStartX);
-            
-            // 如果向下移动且垂直位移大于水平位移，判定为下拉关闭
-            if (diffY > 0 && diffY > diffX) {
-                // 增加阻尼感
-                const translate = Math.pow(diffY, 0.85);
-                this.noteDetailViewer.style.transform = `translateY(${translate}px)`;
-                
-                // 阻止默认滚动
+            const touch = e.touches[0];
+            const diffX = touch.clientX - detailTouchStartX;
+            const diffY = touch.clientY - detailTouchStartY;
+            const absX = Math.abs(diffX);
+            const absY = Math.abs(diffY);
+
+            if (!detailGesture && (absX > 10 || absY > 10)) {
+                if (diffX > 0 && absX > absY) {
+                    detailGesture = 'swipe';
+                } else if (diffY > 0 && absY > absX) {
+                    const content = this.noteDetailViewer.querySelector('.note-detail-content');
+                    if (content && content.scrollTop <= 0) {
+                        detailGesture = 'pulldown';
+                    }
+                }
+            }
+
+            if (detailGesture === 'pulldown') {
                 if (e.cancelable) e.preventDefault();
+                const translate = Math.pow(Math.max(0, touch.clientY - detailTouchStartY), 0.85);
+                this.noteDetailViewer.style.transform = `translateY(${translate}px)`;
+            } else if (detailGesture === 'swipe') {
+                if (e.cancelable) e.preventDefault();
+                const dx = Math.max(0, touch.clientX - detailTouchStartX);
+                const progress = Math.min(dx / (window.innerWidth * 0.45), 1);
+                const scale = 1 - progress * 0.15;
+                const radius = progress * 20;
+                this.noteDetailViewer.style.transform = `translateX(${dx}px) scale(${scale})`;
+                this.noteDetailViewer.style.borderRadius = `${radius}px`;
             }
         }, { passive: false });
 
         this.noteDetailViewer.addEventListener('touchend', (e) => {
-            if (!isPullingDown) return;
-            
-            const currentY = e.changedTouches[0].clientY;
-            const diffY = currentY - detailTouchStartY;
-            
-            this.noteDetailViewer.style.transition = 'transform 0.3s cubic-bezier(0.23, 1, 0.32, 1)';
-            
-            // 下拉超过 150px 则关闭
-            if (diffY > 150) {
-                this.closeNoteDetail();
+            if (detailGesture === 'pulldown') {
+                const diffY = e.changedTouches[0].clientY - detailTouchStartY;
+                this.noteDetailViewer.style.transition = 'transform 0.3s cubic-bezier(0.23, 1, 0.32, 1)';
+                if (diffY > 150) {
+                    this.closeNoteDetail();
+                } else {
+                    this.noteDetailViewer.style.transform = 'translateY(0)';
+                }
+            } else if (detailGesture === 'swipe') {
+                const dx = e.changedTouches[0].clientX - detailTouchStartX;
+                const progress = dx / (window.innerWidth * 0.45);
+                if (progress > 0.35) {
+                    this.closeNoteDetailSwipe();
+                } else {
+                    this.noteDetailViewer.style.transition = 'all 0.3s cubic-bezier(0.23, 1, 0.32, 1)';
+                    this.noteDetailViewer.style.transform = '';
+                    this.noteDetailViewer.style.borderRadius = '';
+                }
             } else {
-                // 否则回弹
-                this.noteDetailViewer.style.transform = 'translateY(0)';
+                this.noteDetailViewer.style.transition = '';
             }
-            isPullingDown = false;
+            detailGesture = '';
         }, { passive: true });
         
-        // 笔记详情图片滑动切换
+        // 笔记详情图片滑动切换（跟手拖拽 + 50%阈值吸附 + 速度甩动）
         let noteTouchStartX = 0;
         let noteTouchStartY = 0;
+        let noteTouchStartTime = 0;
         let noteGestureLock = '';
+        let noteDragging = false;
         this.noteMediaWrapper.addEventListener('touchstart', (e) => {
             noteTouchStartX = e.touches[0].clientX;
             noteTouchStartY = e.touches[0].clientY;
+            noteTouchStartTime = Date.now();
             noteGestureLock = '';
+            noteDragging = false;
+            this.noteMediaWrapper.style.transition = 'none';
         }, { passive: true });
         this.noteMediaWrapper.addEventListener('touchmove', (e) => {
             const touch = e.touches[0];
@@ -274,27 +357,48 @@ class XHSWebUI {
             }
 
             if (noteGestureLock === 'horizontal') {
+                const atFirst = this.noteMediaIndex === 0;
+                const atLast = this.noteMediaIndex === this.noteMediaList.length - 1;
+                if ((atFirst && diffX > 0) || (atLast && diffX < 0)) {
+                    return;
+                }
                 if (e.cancelable) e.preventDefault();
                 e.stopPropagation();
+                noteDragging = true;
+                const containerWidth = this.noteMediaWrapper.parentElement.offsetWidth;
+                const basePercent = -this.noteMediaIndex * 100;
+                const dragPercent = (diffX / containerWidth) * 100;
+                this.noteMediaWrapper.style.transform = `translateX(${basePercent + dragPercent}%)`;
             }
         }, { passive: false });
         this.noteMediaWrapper.addEventListener('touchend', (e) => {
-            const touchEndY = e.changedTouches[0].clientY;
-            const touchEndX = e.changedTouches[0].clientX;
-            const diffX = touchEndX - noteTouchStartX;
-            const diffY = touchEndY - noteTouchStartY;
-            if (noteGestureLock === 'horizontal' && Math.abs(diffX) > 50 && Math.abs(diffX) > Math.abs(diffY)) {
+            if (noteGestureLock === 'horizontal' && noteDragging) {
                 e.stopPropagation();
-                if (diffX > 0) this.prevNoteMedia();
-                else this.nextNoteMedia();
-            } else if (Math.abs(diffX) > 50 && Math.abs(diffX) > Math.abs(diffY)) {
-                if (diffX > 0) this.prevNoteMedia();
-                else this.nextNoteMedia();
+                const touchEndX = e.changedTouches[0].clientX;
+                const diffX = touchEndX - noteTouchStartX;
+                const elapsed = Date.now() - noteTouchStartTime;
+                const velocity = Math.abs(diffX) / elapsed;
+                const containerWidth = this.noteMediaWrapper.parentElement.offsetWidth;
+                const threshold = containerWidth * 0.5;
+                this.noteMediaWrapper.style.transition = 'transform 0.3s ease';
+                const shouldSnap = Math.abs(diffX) > threshold || (velocity > 0.4 && Math.abs(diffX) > 30);
+                if (shouldSnap) {
+                    if (diffX > 0 && this.noteMediaIndex > 0) {
+                        this.noteMediaIndex--;
+                    } else if (diffX < 0 && this.noteMediaIndex < this.noteMediaList.length - 1) {
+                        this.noteMediaIndex++;
+                    }
+                }
+                this.updateNoteMediaUI();
             }
             noteGestureLock = '';
+            noteDragging = false;
         }, { passive: true });
         this.noteMediaWrapper.addEventListener('touchcancel', () => {
             noteGestureLock = '';
+            noteDragging = false;
+            this.noteMediaWrapper.style.transition = 'transform 0.3s ease';
+            this.updateNoteMediaUI();
         }, { passive: true });
 
         // 键盘支持
@@ -482,6 +586,19 @@ class XHSWebUI {
             page.classList.toggle('active', page.id === targetId);
         });
 
+        // 作品集搜索/排序显隐控制（带动画）
+        const historyControls = document.getElementById('historyControls');
+        const mainContent = document.querySelector('.main-content');
+        if (historyControls) {
+            if (targetId === 'history-page') {
+                historyControls.classList.add('visible');
+                mainContent.classList.add('header-expanded');
+            } else {
+                historyControls.classList.remove('visible');
+                mainContent.classList.remove('header-expanded');
+            }
+        }
+
         // 缩放按钮显隐控制：仅在作品集或收藏页面显示
         if (this.scaleBtn) {
             this.scaleBtn.style.display = (targetId === 'history-page' || targetId === 'collection-page') ? 'flex' : 'none';
@@ -591,19 +708,33 @@ class XHSWebUI {
     }
 
     // 笔记详情核心方法
-    openNoteDetail(note) {
+    openNoteDetail(note, sourceEl) {
         if (!note) return;
-        this.noteDetailViewer.style.transition = 'none';
-        this.noteDetailViewer.style.transform = 'translateY(100%)';
-        this.noteDetailViewer.style.display = 'flex';
-        
-        // 强制重绘
-        this.noteDetailViewer.offsetHeight;
-        
-        this.noteDetailViewer.style.transition = 'transform 0.3s cubic-bezier(0.23, 1, 0.32, 1)';
-        this.noteDetailViewer.style.transform = 'translateY(0)';
-        
+        this._noteDetailSourceEl = sourceEl || null;
+
+        const viewer = this.noteDetailViewer;
+        const coverImg = sourceEl && sourceEl.querySelector('.item-cover img');
+        const _expandFromCard = !!coverImg;
+        let _coverRect;
+        if (_expandFromCard) _coverRect = coverImg.getBoundingClientRect();
+
+        viewer.style.transition = 'none';
+        viewer.style.transform = _expandFromCard ? '' : 'translateY(100%)';
+        if (_expandFromCard) viewer.style.backgroundColor = 'transparent';
+        viewer.style.display = 'flex';
         document.body.style.overflow = 'hidden';
+
+        const _detHeader = viewer.querySelector('.note-detail-header');
+        const _detFooter = viewer.querySelector('.note-detail-footer');
+        const _detText = viewer.querySelector('.note-text-content');
+        const _detDots = this.noteMediaDots;
+        const _detCounter = viewer.querySelector('.note-media-counter');
+        const _animEls = [_detHeader, _detFooter, _detText, _detDots, _detCounter].filter(Boolean);
+
+        if (_expandFromCard) {
+            _animEls.forEach(el => { el.style.opacity = '0'; el.style.transition = 'none'; });
+            this.noteMediaWrapper.style.visibility = 'hidden';
+        }
 
         const isMobile = this.isIOS() || this.isAndroid();
 
@@ -672,6 +803,8 @@ class XHSWebUI {
             return (isMobile && item.raw_url) ? item.raw_url : item.url;
         });
         this.noteMediaIndex = 0;
+        this.noteMediaWrapper.style.transition = 'none';
+        this.noteMediaWrapper.style.transform = 'translateX(0%)';
 
         mediaItems.forEach((item, i) => {
             const url = (isMobile && item.raw_url) ? item.raw_url : item.url;
@@ -850,8 +983,11 @@ class XHSWebUI {
         // 渲染文本内容
         this.noteDetailTitle.textContent = note.title || '无标题';
         
-        // 描述去重：去除 desc 中 #标签 部分（tags 会单独用蓝色标签渲染）
+        // 描述去重：去除 desc 中 #标签 和 [话题] 占位符（tags 会单独用蓝色标签渲染）
         let cleanDesc = note.desc || '';
+        // 1. 去掉 [话题]#xxx 或 [话题] 占位符
+        cleanDesc = cleanDesc.replace(/\[话题\]\s*/g, '');
+        // 2. 去掉 #标签名（蓝色标签已经单独渲染）
         if (note.tags) {
             const tagList = note.tags.split(/[#\s]+/).filter(t => t.trim());
             tagList.forEach(tag => {
@@ -860,6 +996,8 @@ class XHSWebUI {
                 }
             });
         }
+        // 3. 清理残留的孤立 # 号
+        cleanDesc = cleanDesc.replace(/#\s*/g, '');
         this.noteDetailDesc.textContent = cleanDesc.trim();
         
         // 渲染标签
@@ -878,20 +1016,406 @@ class XHSWebUI {
         this.noteLikeCount.textContent = this.formatNum(note.likeCount);
         this.noteCollectCount.textContent = this.formatNum(note.collectCount);
         this.noteCommentCount.textContent = this.formatNum(note.commentCount);
+
+        if (_expandFromCard) {
+            viewer.offsetHeight;
+            const mediaContainer = viewer.querySelector('.note-media-container');
+            const targetRect = mediaContainer.getBoundingClientRect();
+            const dur = 380;
+
+            const clone = document.createElement('img');
+            clone.src = coverImg.src;
+            clone.referrerPolicy = 'no-referrer';
+            Object.assign(clone.style, {
+                position: 'fixed', zIndex: '9999',
+                left: _coverRect.left + 'px', top: _coverRect.top + 'px',
+                width: _coverRect.width + 'px', height: _coverRect.height + 'px',
+                objectFit: 'cover', background: '#1B1B1B',
+                borderRadius: '8px', pointerEvents: 'none',
+                willChange: 'left, top, width, height',
+                transition: `left ${dur}ms cubic-bezier(0.25, 0.1, 0.25, 1), top ${dur}ms cubic-bezier(0.25, 0.1, 0.25, 1), width ${dur}ms cubic-bezier(0.25, 0.1, 0.25, 1), height ${dur}ms cubic-bezier(0.25, 0.1, 0.25, 1), border-radius ${dur}ms ease`,
+            });
+            document.body.appendChild(clone);
+
+            _detHeader.style.transform = 'translateY(-100%)';
+            _detFooter.style.transform = 'translateY(100%)';
+            [_detText, _detDots, _detCounter].filter(Boolean).forEach(el => {
+                el.style.transform = 'translateY(30px)';
+            });
+
+            clone.offsetHeight;
+
+            viewer.style.transition = `background-color ${dur * 0.6}ms ease`;
+            viewer.style.backgroundColor = '#1A191F';
+            Object.assign(clone.style, {
+                left: targetRect.left + 'px', top: targetRect.top + 'px',
+                width: targetRect.width + 'px', height: targetRect.height + 'px',
+                borderRadius: '0',
+            });
+
+            setTimeout(() => {
+                _animEls.forEach(el => {
+                    el.style.transition = `opacity ${dur * 0.5}ms ease, transform ${dur * 0.5}ms ease`;
+                    el.style.opacity = '1';
+                    el.style.transform = 'translateY(0)';
+                });
+            }, dur * 0.25);
+
+            setTimeout(() => {
+                this.noteMediaWrapper.style.visibility = '';
+                clone.style.transition = 'opacity 120ms ease';
+                clone.style.opacity = '0';
+                setTimeout(() => {
+                    clone.remove();
+                    _animEls.forEach(el => {
+                        el.style.transition = '';
+                        el.style.opacity = '';
+                        el.style.transform = '';
+                    });
+                    viewer.style.transition = '';
+                }, 130);
+            }, dur);
+        } else {
+            viewer.offsetHeight;
+            viewer.style.transition = 'transform 0.3s cubic-bezier(0.23, 1, 0.32, 1)';
+            viewer.style.transform = 'translateY(0)';
+        }
     }
 
     closeNoteDetail() {
-        this.noteDetailViewer.style.transition = 'transform 0.3s cubic-bezier(0.23, 1, 0.32, 1)';
-        this.noteDetailViewer.style.transform = 'translateY(100%)';
+        const source = this._noteDetailSourceEl;
+        const coverImg = source && source.querySelector('.item-cover img');
+        if (coverImg) {
+            this.closeNoteDetailSwipe();
+        } else {
+            this.noteDetailViewer.style.transition = 'transform 0.3s cubic-bezier(0.23, 1, 0.32, 1)';
+            this.noteDetailViewer.style.transform = 'translateY(100%)';
+            setTimeout(() => {
+                this.noteDetailViewer.style.display = 'none';
+                this._resetDetailStyles();
+            }, 300);
+        }
+    }
+
+    closeNoteDetailSwipe() {
+        const viewer = this.noteDetailViewer;
+        const source = this._noteDetailSourceEl;
+        const dur = 380;
+
+        const mediaContainer = viewer.querySelector('.note-media-container');
+        const coverImg = source && source.querySelector('.item-cover img');
+
+        if (mediaContainer && coverImg) {
+            const imgRect = mediaContainer.getBoundingClientRect();
+            const targetRect = coverImg.getBoundingClientRect();
+
+            if (imgRect.width < 1 || imgRect.height < 1 || targetRect.width < 1) {
+                this._closeDetailFallback(viewer, dur);
+                return;
+            }
+
+            const clone = document.createElement('img');
+            clone.src = coverImg.src;
+            clone.referrerPolicy = 'no-referrer';
+            Object.assign(clone.style, {
+                position: 'fixed', zIndex: '9999',
+                left: imgRect.left + 'px', top: imgRect.top + 'px',
+                width: imgRect.width + 'px', height: imgRect.height + 'px',
+                objectFit: 'cover', background: '#1B1B1B',
+                borderRadius: '0', pointerEvents: 'none',
+                opacity: '0',
+                willChange: 'left, top, width, height',
+            });
+            document.body.appendChild(clone);
+
+            const header = viewer.querySelector('.note-detail-header');
+            const footer = viewer.querySelector('.note-detail-footer');
+            const textContent = viewer.querySelector('.note-text-content');
+            const dots = viewer.querySelector('.note-media-dots');
+            const counter = viewer.querySelector('.note-media-counter');
+
+            clone.offsetHeight;
+            clone.style.transition = 'opacity 100ms ease';
+            clone.style.opacity = '1';
+            mediaContainer.style.transition = 'opacity 100ms ease';
+            mediaContainer.style.opacity = '0';
+
+            setTimeout(() => {
+                clone.style.transition = `left ${dur}ms cubic-bezier(0.4, 0, 0.2, 1), top ${dur}ms cubic-bezier(0.4, 0, 0.2, 1), width ${dur}ms cubic-bezier(0.4, 0, 0.2, 1), height ${dur}ms cubic-bezier(0.4, 0, 0.2, 1), border-radius ${dur}ms ease, background ${dur * 0.6}ms ease`;
+
+                Object.assign(clone.style, {
+                    left: targetRect.left + 'px', top: targetRect.top + 'px',
+                    width: targetRect.width + 'px', height: targetRect.height + 'px',
+                    borderRadius: '8px', background: 'transparent',
+                });
+
+                if (header) {
+                    header.style.transition = `opacity ${dur * 0.3}ms ease, transform ${dur * 0.3}ms ease`;
+                    header.style.opacity = '0';
+                    header.style.transform = 'translateY(-100%)';
+                }
+                if (footer) {
+                    footer.style.transition = `opacity ${dur * 0.3}ms ease, transform ${dur * 0.3}ms ease`;
+                    footer.style.opacity = '0';
+                    footer.style.transform = 'translateY(100%)';
+                }
+                [textContent, dots, counter].filter(Boolean).forEach(el => {
+                    el.style.transition = `opacity ${dur * 0.3}ms ease, transform ${dur * 0.3}ms ease`;
+                    el.style.opacity = '0';
+                    el.style.transform = 'translateY(30px)';
+                });
+
+                viewer.style.transition = `background-color ${dur * 0.5}ms ease`;
+                viewer.style.backgroundColor = 'transparent';
+            }, 110);
+
+            const allEls = [header, footer, textContent, dots, counter, mediaContainer].filter(Boolean);
+            setTimeout(() => {
+                clone.remove();
+                viewer.style.display = 'none';
+                this._resetDetailStyles();
+                allEls.forEach(el => {
+                    el.style.transition = ''; el.style.opacity = '';
+                    el.style.transform = '';
+                });
+                this.noteMediaWrapper.style.visibility = '';
+            }, 110 + dur + 20);
+        } else {
+            this._closeDetailFallback(viewer, dur);
+        }
+    }
+
+    _closeDetailFallback(viewer, duration) {
+        viewer.style.transition = `transform ${duration}ms ease-in-out, opacity ${duration * 0.6}ms ease ${duration * 0.4}ms`;
+        viewer.style.transform = 'translateX(100%) scale(0.85)';
+        viewer.style.opacity = '0';
         setTimeout(() => {
-            this.noteDetailViewer.style.display = 'none';
-            this.noteDetailViewer.style.transform = 'translateY(0)';
-            document.body.style.overflow = '';
-        }, 300);
+            viewer.style.display = 'none';
+            this._resetDetailStyles();
+        }, duration);
+    }
+
+    _resetDetailStyles() {
+        const viewer = this.noteDetailViewer;
+        viewer.style.transform = '';
+        viewer.style.borderRadius = '';
+        viewer.style.opacity = '';
+        viewer.style.transition = '';
+        viewer.style.backgroundColor = '';
+        document.body.style.overflow = '';
+    }
+
+    _fixIOSInputZoom() {
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+        if (!isIOS) return;
+        const vp = document.querySelector('meta[name="viewport"]');
+        if (!vp) return;
+        const base = 'width=device-width, initial-scale=1.0, viewport-fit=cover';
+        document.addEventListener('focusin', (e) => {
+            if (e.target.matches('input, select, textarea')) {
+                vp.setAttribute('content', base + ', maximum-scale=1.0');
+            }
+        });
+        document.addEventListener('focusout', (e) => {
+            if (e.target.matches('input, select, textarea')) {
+                setTimeout(() => vp.setAttribute('content', base), 100);
+            }
+        });
+    }
+
+    _initScrollRail() {
+        const rail = document.getElementById('scrollRail');
+        if (!rail) return;
+        const track = rail.querySelector('.scroll-rail-track');
+        const thumb = rail.querySelector('.scroll-rail-thumb');
+        const scroller = document.querySelector('.main-content');
+        if (!track || !thumb || !scroller) return;
+
+        let hideTimer = null;
+        let isDragging = false;
+        let dragStartY = 0;
+        let dragStartThumbTop = 0;
+        let isRepositionMode = false;
+        let repoStartX = 0;
+        let rafId = null;
+        let pendingTop = null;
+        let lastY = 0;
+        let lastTime = 0;
+        let velocity = 0;
+        let inertiaId = null;
+        let lastTapTime = 0;
+
+        const getTrackMetrics = () => {
+            const trackH = track.clientHeight;
+            const thumbH = thumb.clientHeight;
+            return { trackH, thumbH, maxTop: trackH - thumbH };
+        };
+
+        const applyPosition = (rawTop) => {
+            const { maxTop } = getTrackMetrics();
+            const clamped = Math.max(0, Math.min(maxTop, rawTop));
+            thumb.style.top = clamped + 'px';
+            const { scrollHeight, clientHeight } = scroller;
+            scroller.scrollTop = (clamped / maxTop) * (scrollHeight - clientHeight);
+            return clamped;
+        };
+
+        const showRail = () => {
+            rail.classList.add('visible');
+            resetHideTimer();
+        };
+
+        const hideRail = () => {
+            if (!isDragging) rail.classList.remove('visible');
+        };
+
+        const resetHideTimer = () => {
+            clearTimeout(hideTimer);
+            hideTimer = setTimeout(hideRail, 3000);
+        };
+
+        const updateThumb = () => {
+            const { scrollTop, scrollHeight, clientHeight } = scroller;
+            if (scrollHeight <= clientHeight) { rail.classList.remove('visible'); return; }
+            const { maxTop } = getTrackMetrics();
+            thumb.style.top = (scrollTop / (scrollHeight - clientHeight)) * maxTop + 'px';
+        };
+
+        scroller.addEventListener('scroll', () => {
+            if (!isDragging) {
+                showRail();
+                updateThumb();
+            }
+        }, { passive: true });
+
+        const onTrackDown = (e) => {
+            e.stopPropagation();
+            if (e.cancelable) e.preventDefault();
+            cancelInertia();
+            const pt = e.touches ? e.touches[0] : e;
+            const now = performance.now();
+
+            if (now - lastTapTime < 400) {
+                lastTapTime = 0;
+                isRepositionMode = true;
+                repoStartX = pt.clientX;
+                rail.classList.add('reposition-ready');
+                isDragging = true;
+                clearTimeout(hideTimer);
+                if (navigator.vibrate) navigator.vibrate(20);
+                return;
+            }
+            lastTapTime = now;
+
+            const trackRect = track.getBoundingClientRect();
+            const { thumbH, maxTop } = getTrackMetrics();
+            const hitTop = Math.max(0, Math.min(maxTop, pt.clientY - trackRect.top - thumbH / 2));
+            applyPosition(hitTop);
+
+            isDragging = true;
+            rail.classList.add('dragging');
+            clearTimeout(hideTimer);
+            dragStartY = pt.clientY;
+            dragStartThumbTop = hitTop;
+            lastY = pt.clientY;
+            lastTime = performance.now();
+            velocity = 0;
+        };
+
+        const onDragMove = (e) => {
+            if (!isDragging) return;
+            const pt = e.touches ? e.touches[0] : e;
+
+            if (isRepositionMode) return;
+
+            const now = performance.now();
+            const dt = now - lastTime;
+            if (dt > 0) {
+                const instantV = (pt.clientY - lastY) / dt;
+                velocity = velocity * 0.65 + instantV * 0.35;
+            }
+            lastY = pt.clientY;
+            lastTime = now;
+
+            pendingTop = dragStartThumbTop + (pt.clientY - dragStartY);
+            if (!rafId) {
+                rafId = requestAnimationFrame(() => {
+                    if (pendingTop !== null) {
+                        applyPosition(pendingTop);
+                        pendingTop = null;
+                    }
+                    rafId = null;
+                });
+            }
+        };
+
+        const cancelInertia = () => {
+            if (inertiaId) { cancelAnimationFrame(inertiaId); inertiaId = null; }
+        };
+
+        const startInertia = () => {
+            const { maxTop } = getTrackMetrics();
+            let currentTop = parseFloat(thumb.style.top) || 0;
+            let v = velocity * 15;
+            const friction = 0.93;
+
+            const step = () => {
+                v *= friction;
+                if (Math.abs(v) < 0.3) {
+                    inertiaId = null;
+                    resetHideTimer();
+                    return;
+                }
+                currentTop += v;
+                currentTop = applyPosition(currentTop);
+                inertiaId = requestAnimationFrame(step);
+            };
+            inertiaId = requestAnimationFrame(step);
+        };
+
+        const onDragEnd = (e) => {
+            if (!isDragging) return;
+            cancelAnimationFrame(rafId);
+            rafId = null;
+
+            if (pendingTop !== null) {
+                applyPosition(pendingTop);
+                pendingTop = null;
+            }
+
+            if (isRepositionMode) {
+                const pt = e.changedTouches ? e.changedTouches[0] : e;
+                const dx = pt.clientX - repoStartX;
+                if (Math.abs(dx) > 30) {
+                    rail.classList[dx < 0 ? 'add' : 'remove']('left-side');
+                }
+                isRepositionMode = false;
+                rail.classList.remove('reposition-ready');
+            }
+
+            isDragging = false;
+            rail.classList.remove('dragging');
+
+            if (!isRepositionMode && Math.abs(velocity) > 0.08) {
+                startInertia();
+            } else {
+                resetHideTimer();
+            }
+        };
+
+        track.addEventListener('touchstart', onTrackDown, { passive: false });
+        track.addEventListener('mousedown', onTrackDown);
+        window.addEventListener('touchmove', onDragMove, { passive: true });
+        window.addEventListener('mousemove', onDragMove);
+        window.addEventListener('touchend', onDragEnd, { passive: true });
+        window.addEventListener('mouseup', onDragEnd);
+
+        updateThumb();
     }
 
     prevNoteMedia() {
         if (this.noteMediaIndex > 0) {
+            this.noteMediaWrapper.style.transition = 'transform 0.3s ease';
             this.noteMediaIndex--;
             this.updateNoteMediaUI();
         }
@@ -899,12 +1423,15 @@ class XHSWebUI {
 
     nextNoteMedia() {
         if (this.noteMediaIndex < this.noteMediaList.length - 1) {
+            this.noteMediaWrapper.style.transition = 'transform 0.3s ease';
             this.noteMediaIndex++;
             this.updateNoteMediaUI();
         }
     }
 
     updateNoteMediaUI() {
+        this.noteMediaWrapper.style.transform = `translateX(${-this.noteMediaIndex * 100}%)`;
+
         const mediaItems = this.noteMediaWrapper.querySelectorAll('.note-media-item');
         mediaItems.forEach((item, index) => {
             item.classList.toggle('active', index === this.noteMediaIndex);
@@ -971,35 +1498,149 @@ class XHSWebUI {
         this.setTheme(savedTheme);
     }
 
+    detectLinks() {
+        const text = this.urlInput.value;
+        const regex = /https?:\/\/[^\s)>"']*(?:xiaohongshu|xhslink)\.com[^\s)>"']*/gi;
+        const matches = text.match(regex) || [];
+        return [...new Set(matches)];
+    }
+
+    extractLinkContext(url) {
+        const text = this.urlInput.value;
+        const lines = text.split('\n');
+        for (const line of lines) {
+            if (!line.includes(url)) continue;
+            let label = line.replace(url, '').trim();
+            label = label.replace(/https?:\/\/\S+/g, '').trim();
+            label = label.replace(/[😆😊🎉🔥❤️💕✨🌟📕💗🥰😍👏🎁🎀💐⭐️🌈☀️🌸💜💙💚🏠🎊🤩🤗😏🤔🤫🥳😎🫡🫶🙌👍🤭😁😂🤣😅🥺😤😢🥹😃😄😉🤝👋🙏💯🫰🤞✅✌️👌🎶💃🫧⚡️🎵🎤🏆🎯🎬📢🗣️💬💡📌🔔🆘🆕🔥]/gu, '').trim();
+            label = label.replace(/发布了一篇小红书笔记，快来看吧！?\s*/g, '').trim();
+            label = label.replace(/^\d+\s*/, '').trim();
+            if (label && label.length > 1 && label.length < 80) return label;
+        }
+        return '';
+    }
+
+    renderDetectedLinks(links) {
+        if (!links || links.length === 0) {
+            this.detectedLinksEl.style.display = 'none';
+            this.detectedLinksEl.innerHTML = '';
+            return;
+        }
+        this.detectedLinksEl.style.display = 'flex';
+        this.detectedLinksEl.innerHTML = links.map((url, i) => {
+            const title = this.extractLinkContext(url);
+            const shortUrl = url.length > 45 ? url.slice(0, 45) + '...' : url;
+            return `<div class="detected-link-item">
+                <span class="detected-link-num">${i + 1}</span>
+                <div class="detected-link-info">
+                    ${title ? `<span class="detected-link-title">${title}</span>` : ''}
+                    <span class="detected-link-url" title="${url}">${shortUrl}</span>
+                </div>
+                <button class="detected-link-del" data-url="${url}">✕</button>
+            </div>`;
+        }).join('') + `<div class="detected-links-count">检测到 ${links.length} 个链接</div>`;
+
+        this.detectedLinksEl.querySelectorAll('.detected-link-del').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const urlToRemove = btn.dataset.url;
+                const lines = this.urlInput.value.split('\n');
+                this.urlInput.value = lines.filter(line => !line.includes(urlToRemove)).join('\n');
+                this.detectAndRenderLinks();
+            });
+        });
+    }
+
+    detectAndRenderLinks() {
+        this.renderDetectedLinks(this.detectLinks());
+    }
+
     async fetchNote(refresh = false) {
-        const url = this.urlInput.value.trim();
-        if (!url) {
+        const links = this.detectLinks();
+        const rawText = this.urlInput.value.trim();
+
+        if (!rawText) {
             this.showError('请输入小红书作品链接');
             return;
         }
 
-        this.showLoading();
+        const urlsToFetch = links.length > 0 ? links : [rawText];
 
+        if (urlsToFetch.length === 1) {
+            await this._fetchSingleNote(urlsToFetch[0], refresh);
+        } else {
+            await this._fetchBatchNotes(urlsToFetch);
+        }
+    }
+
+    async _fetchSingleNote(url, refresh = false) {
+        this.showLoading();
         try {
-            const settings = JSON.parse(localStorage.getItem('xhs_settings') || '{}');
-            const cookie = settings.cookie || '';
-            const imageFormat = settings.imageFormat || 'webp';
-            const videoPref = settings.videoPref || 'resolution';
-            const proxy = settings.proxy || '';
-            
-            const apiUrl = `/web/api/note?url=${encodeURIComponent(url)}&cookie=${encodeURIComponent(cookie)}&refresh=${refresh}&image_format=${imageFormat}&video_preference=${videoPref}&proxy=${encodeURIComponent(proxy)}&token=${encodeURIComponent(this.token)}`;
-            const resp = await fetch(apiUrl);
-            if (!resp.ok) throw new Error(await resp.text());
-            
-            const data = await resp.json();
+            const data = await this._callNoteApi(url, refresh);
             this.currentNote = data;
             this.displayResult(data);
-            
-            // 显示刷新按钮
             this.refreshBtn.style.display = 'flex';
         } catch (err) {
             this.showError(err.message || '获取失败，请检查链接或 Cookie');
         }
+    }
+
+    async _fetchBatchNotes(urls) {
+        this.hideAll();
+        const total = urls.length;
+        let success = 0;
+        let failed = 0;
+
+        const savedWaveHtml = this.loading.innerHTML;
+        this.loading.style.display = 'flex';
+        this.loading.innerHTML = `<div class="batch-progress">
+            <div class="batch-progress-text">正在批量获取 0/${total}...</div>
+            <div class="batch-progress-bar"><div class="batch-progress-fill" style="width:0%"></div></div>
+            <div class="batch-progress-detail">准备中...</div>
+        </div>`;
+
+        const progressText = this.loading.querySelector('.batch-progress-text');
+        const progressFill = this.loading.querySelector('.batch-progress-fill');
+        const progressDetail = this.loading.querySelector('.batch-progress-detail');
+
+        for (let i = 0; i < total; i++) {
+            const url = urls[i];
+            const current = i + 1;
+            progressText.textContent = `正在批量获取 ${current}/${total}...`;
+            progressFill.style.width = `${(current / total) * 100}%`;
+            const shortUrl = url.length > 40 ? url.slice(0, 40) + '...' : url;
+            progressDetail.textContent = shortUrl;
+
+            try {
+                await this._callNoteApi(url, false);
+                success++;
+            } catch (err) {
+                failed++;
+                console.log(`批量获取失败 [${current}/${total}]:`, err.message);
+            }
+        }
+
+        this.loading.style.display = 'none';
+        this.loading.innerHTML = savedWaveHtml;
+        this.urlInput.value = '';
+        this.renderDetectedLinks([]);
+
+        const msg = failed > 0
+            ? `批量获取完成：成功 ${success} 个，失败 ${failed} 个`
+            : `成功获取 ${success} 个作品`;
+        if (window.showToast) window.showToast(msg);
+    }
+
+    async _callNoteApi(url, refresh) {
+        const settings = JSON.parse(localStorage.getItem('xhs_settings') || '{}');
+        const cookie = settings.cookie || '';
+        const imageFormat = settings.imageFormat || 'webp';
+        const videoPref = settings.videoPref || 'resolution';
+        const proxy = settings.proxy || '';
+
+        const apiUrl = `/web/api/note?url=${encodeURIComponent(url)}&cookie=${encodeURIComponent(cookie)}&refresh=${refresh}&image_format=${imageFormat}&video_preference=${videoPref}&proxy=${encodeURIComponent(proxy)}&token=${encodeURIComponent(this.token)}`;
+        const resp = await fetch(apiUrl);
+        if (!resp.ok) throw new Error(await resp.text());
+        return await resp.json();
     }
 
     displayResult(data) {
@@ -1317,14 +1958,12 @@ class XHSWebUI {
 
                 // 模式切换状态
                 let currentMode = 'scroll';
-                const modeLabels = { scroll: '📐 横排', wrap: '📦 换行', ring: '🔄 环形' };
+                const modeLabels = { scroll: '📐 横排', wrap: '📦 换行' };
                 const modeToggleBtn = header.querySelector('.mode-toggle-btn');
 
                 modeToggleBtn.onclick = (e) => {
                     e.stopPropagation();
-                    const modes = ['scroll', 'wrap', 'ring'];
-                    const idx = modes.indexOf(currentMode);
-                    currentMode = modes[(idx + 1) % modes.length];
+                    currentMode = currentMode === 'scroll' ? 'wrap' : 'scroll';
                     modeToggleBtn.textContent = modeLabels[currentMode];
                     modeToggleBtn.dataset.mode = currentMode;
                     this._applyCardMode(viewport, wrapper, currentMode, row, authorItems);
@@ -1431,7 +2070,7 @@ class XHSWebUI {
                         if (this.isListEditMode) return;
                         if (!isLongPress && !isMoving) {
                             // 既不是长按也不是滑动，才是短按详情
-                            this.openNoteDetail(note);
+                            this.openNoteDetail(note, card);
                         }
                     };
 
@@ -1475,8 +2114,8 @@ class XHSWebUI {
         }
 
         // 清除所有模式类和内联样式，回到 base
-        viewport.classList.remove('cards-viewport--wrap', 'cards-viewport--ring');
-        wrapper.classList.remove('cards-wrapper--wrap', 'cards-wrapper--ring');
+        viewport.classList.remove('cards-viewport--wrap');
+        wrapper.classList.remove('cards-wrapper--wrap');
 
         const cards = wrapper.querySelectorAll('.list-item');
         cards.forEach(c => {
@@ -1486,6 +2125,7 @@ class XHSWebUI {
             c.style.top = '';
             c.style.zIndex = '';
             c.style.transition = '';
+            c.style.opacity = '';
         });
 
         // 移除 viewport 和 wrapper 上所有可能的内联样式
@@ -1496,8 +2136,7 @@ class XHSWebUI {
         row.style.height = '';
 
         if (mode === 'scroll') {
-            // 恢复横排滚动模式 — 依赖 base CSS，不需要内联
-            // StackSwipe 会重新初始化
+            // 恢复横排滚动模式 — 依赖 base CSS
             if (window.StackSwipe) {
                 const swipe = new StackSwipe(viewport);
                 this.swipeInstances.push(swipe);
@@ -1506,31 +2145,6 @@ class XHSWebUI {
         } else if (mode === 'wrap') {
             viewport.classList.add('cards-viewport--wrap');
             wrapper.classList.add('cards-wrapper--wrap');
-        } else if (mode === 'ring') {
-            viewport.classList.add('cards-viewport--ring');
-            wrapper.classList.add('cards-wrapper--ring');
-
-            const count = cards.length;
-            const radius = Math.min(16, count * 3);
-            cards.forEach((card, i) => {
-                const angle = (i / count) * Math.PI * 2 - Math.PI / 2;
-                const x = Math.cos(angle) * radius;
-                const y = Math.sin(angle) * radius;
-                const rotation = (angle * 180 / Math.PI) + 90;
-                const baseTransform = `translateX(${x}vh) translateY(${y}vh) rotate(${rotation}deg)`;
-                card.style.position = 'relative';
-                card.style.transform = baseTransform;
-                card.style.zIndex = Math.round(count - i);
-                card.style.transition = 'transform 0.3s ease, z-index 0.3s ease';
-                card.addEventListener('mouseenter', function onRingHover() {
-                    this.style.transform = `${baseTransform} scale(1.2)`;
-                    this.style.zIndex = '999';
-                });
-                card.addEventListener('mouseleave', function onRingLeave() {
-                    this.style.transform = baseTransform;
-                    this.style.zIndex = Math.round(count - i);
-                });
-            });
         }
     }
 
