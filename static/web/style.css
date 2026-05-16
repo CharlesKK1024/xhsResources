@@ -455,6 +455,32 @@ body {
     background-color: #52c41a;
 }
 
+.browse-users-icon-btn {
+    width: 5vh;
+    height: 5vh;
+    min-height: 4vh;
+    flex-shrink: 0;
+    border: none;
+    border-radius: 1.2vh;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    font-size: 2.2vh;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.browse-users-icon-btn:active {
+    transform: scale(0.92);
+}
+
+.browse-users-icon-btn.ub-active-toggle {
+    background: var(--primary-color);
+    border-color: var(--primary-color);
+}
+
 .detected-links {
     display: flex;
     flex-direction: column;
@@ -1197,14 +1223,17 @@ body {
     transition: box-shadow 0.3s, border-color 0.3s, width 0.2s, height 0.2s;
     border: 1px solid var(--border-color);
     position: relative;
-    width: calc(15vh * var(--card-scale)); /* 缩放宽度 */
-    height: calc(20vh * var(--card-scale)); /* 缩放高度 */
+    width: calc(15vh * var(--card-scale));
+    height: calc(20vh * var(--card-scale));
     flex-shrink: 0;
     transform-origin: center center;
+    display: flex;
+    flex-direction: column;
 }
 
 .item-cover {
-    height: calc(100% - 15%);
+    flex: 1;
+    min-height: 0;
     position: relative;
 }
 
@@ -1221,7 +1250,7 @@ body {
 }
 
 .item-info {
-    height: 15%;
+    flex-shrink: 0;
     padding: 0.6vh;
 }
 
@@ -1229,10 +1258,9 @@ body {
     font-weight: 600;
     font-size: 1.1vh;
     margin-bottom: 0.3vh;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
+    white-space: nowrap;
     overflow: hidden;
+    text-overflow: ellipsis;
     line-height: 1.3;
 }
 

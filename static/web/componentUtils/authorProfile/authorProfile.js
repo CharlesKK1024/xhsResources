@@ -7,6 +7,8 @@
     let currentAvatar = '';
     let currentWorks = [];
     let tagsScrollTimer = null;
+    let currentProfileMode = 'author';
+    let currentProfileUserId = null;
 
     function getOrCreateOverlay() {
         if (overlay && document.body.contains(overlay)) return overlay;
@@ -424,6 +426,83 @@
         return String(n);
     }
 
+    async function openUserProfile(userId, appInstance) {
+        currentProfileMode = 'user';
+        currentProfileUserId = userId;
+        currentAuthorId = null;
+        currentApp = appInstance;
+        var el = getOrCreateOverlay();
+        el.style.zIndex = window.nextOverlayZ();
+
+        el.querySelector('.ap-header-title').textContent = '加载中...';
+        el.querySelector('.ap-name').textContent = '';
+        el.querySelector('.ap-uid').style.display = 'none';
+        el.querySelector('.ap-ip-location').style.display = 'none';
+        el.querySelector('.ap-xhs-link').style.display = 'none';
+        el.querySelector('.ap-tags-section').style.display = 'none';
+        el.querySelector('.ap-works-grid').innerHTML = '<div class="ap-loading">加载中...</div>';
+        el.querySelector('.ap-works-count').textContent = '';
+        el.querySelector('.ap-avatar-large').src = '';
+        el.querySelector('.ap-follow-btn').textContent = '关注';
+        el.querySelector('.ap-add-friend').style.display = 'none';
+
+        el.classList.add('ap-visible');
+        document.body.style.overflow = 'hidden';
+
+        var token = (appInstance && appInstance.token) || localStorage.getItem('xhs_token') || '';
+        try {
+            var resp = await fetch('/web/api/user/' + userId + '/profile?token=' + encodeURIComponent(token));
+            if (!resp.ok) {
+                el.querySelector('.ap-works-grid').innerHTML = '<div class="ap-loading">用户不存在</div>';
+                return;
+            }
+            var data = await resp.json();
+            currentWorks = data.works || [];
+            currentAvatar = data.avatar_url || '';
+
+            el.querySelector('.ap-header-title').textContent = data.nickname || '用户';
+            el.querySelector('.ap-name').textContent = data.nickname || '用户';
+
+            if (data.avatar_url) {
+                var avatarUrl = getMediaUrl(data.avatar_url);
+                el.querySelector('.ap-avatar-large').src = avatarUrl;
+            }
+
+            var followBtn = el.querySelector('.ap-follow-btn');
+            followBtn.textContent = data.is_following ? '已关注' : '关注';
+            followBtn.onclick = async function () {
+                var isFollowing = followBtn.textContent === '已关注';
+                try {
+                    if (isFollowing) {
+                        await fetch('/web/api/user/follow?target_id=' + userId + '&token=' + encodeURIComponent(token), { method: 'DELETE' });
+                        followBtn.textContent = '关注';
+                    } else {
+                        await fetch('/web/api/user/follow', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ target_id: userId, token: token }),
+                        });
+                        followBtn.textContent = '已关注';
+                    }
+                } catch (e) {
+                    if (window.showToast) window.showToast('操作失败');
+                }
+            };
+
+            var chatBtn = el.querySelector('.ap-chat-btn');
+            chatBtn.onclick = function () {
+                if (window.ChatUI && window.ChatUI.openUserChat) {
+                    window.ChatUI.openUserChat(userId, data.nickname, data.avatar_url);
+                }
+            };
+
+            el.querySelector('.ap-works-count').textContent = data.work_count + ' 篇';
+            renderWorks(el, currentWorks);
+        } catch (e) {
+            el.querySelector('.ap-works-grid').innerHTML = '<div class="ap-loading">网络错误</div>';
+        }
+    }
+
     function close() {
         stopTagsScroll();
         if (overlay) {
@@ -437,6 +516,15 @@
         currentAuthorId = null;
         currentApp = null;
         currentWorks = [];
+        currentProfileMode = 'author';
+        currentProfileUserId = null;
+
+        if (overlay) {
+            overlay.querySelector('.ap-uid').style.display = '';
+            overlay.querySelector('.ap-ip-location').style.display = '';
+            overlay.querySelector('.ap-xhs-link').style.display = '';
+            overlay.querySelector('.ap-add-friend').style.display = '';
+        }
     }
 
     function isOpen() {
@@ -445,6 +533,7 @@
 
     window.AuthorProfile = {
         open: open,
+        openUserProfile: openUserProfile,
         close: close,
         isOpen: isOpen,
     };

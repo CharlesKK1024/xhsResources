@@ -345,6 +345,13 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
             logging(lambda: print, f"Web API 错误: {e}", ERROR)
             return JSONResponse({"error": str(e)}, status_code=500)
 
+    @app.get("/web/api/note/lookup")
+    async def lookup_note(note_id: str = Query(..., description="笔记ID")):
+        data = await recorder.get_note_by_id_global(note_id)
+        if data:
+            return data
+        return JSONResponse({"error": "笔记不存在"}, status_code=404)
+
     @app.get("/web/api/history")
     async def get_history(
         search: Optional[str] = None,
@@ -359,6 +366,8 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
                 user_id = user_data["id"]
                 if user_data.get("nickname") == "龙哥":
                     include_legacy = True
+        if user_id is None:
+            return []
         return await recorder.get_history(search, sort, user_id, include_legacy)
 
     @app.get("/web/api/collection")
@@ -375,20 +384,34 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
                 user_id = user_data["id"]
                 if user_data.get("nickname") == "龙哥":
                     include_legacy = True
+        if user_id is None:
+            return []
         return await recorder.get_collections(search, tag, user_id, include_legacy)
 
     @app.post("/web/api/star")
     async def toggle_star(payload: dict = Body(...)):
         note_id = payload.get("note_id")
         is_starred = payload.get("is_starred", 0)
-        await recorder.update_star(note_id, is_starred)
+        token = payload.get("token", "")
+        user_id = None
+        if token:
+            user_data = await recorder.get_user_by_token(token)
+            if user_data:
+                user_id = user_data["id"]
+        await recorder.update_star(note_id, is_starred, user_id)
         return {"status": "success"}
 
     @app.post("/web/api/tag")
     async def update_tags(payload: dict = Body(...)):
         note_id = payload.get("note_id")
         tags = payload.get("tags", "")
-        await recorder.update_tags(note_id, tags)
+        token = payload.get("token", "")
+        user_id = None
+        if token:
+            user_data = await recorder.get_user_by_token(token)
+            if user_data:
+                user_id = user_data["id"]
+        await recorder.update_tags(note_id, tags, user_id)
         return {"status": "success"}
 
     @app.get("/web/api/history/by-tag")
@@ -438,8 +461,16 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
         return {"stats": stats}
 
     @app.delete("/web/api/history/{note_id}")
-    async def delete_history(note_id: str):
-        await recorder.delete_history(note_id)
+    async def delete_history(
+        note_id: str,
+        token: str = Query("", description="用户令牌"),
+    ):
+        user_id = None
+        if token:
+            user_data = await recorder.get_user_by_token(token)
+            if user_data:
+                user_id = user_data["id"]
+        await recorder.delete_history(note_id, user_id)
         return {"status": "success"}
 
     @app.delete("/web/api/cache")
@@ -462,8 +493,14 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
     async def update_note(payload: dict = Body(...)):
         note_id = payload.get("note_id")
         data = payload.get("data")
+        token = payload.get("token", "")
+        user_id = None
+        if token:
+            user_data = await recorder.get_user_by_token(token)
+            if user_data:
+                user_id = user_data["id"]
         if note_id and data:
-            await recorder.update_note_data(note_id, data)
+            await recorder.update_note_data(note_id, data, user_id)
             return {"status": "success"}
         return JSONResponse({"error": "Invalid payload"}, status_code=400)
 
@@ -929,6 +966,11 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
             if not user:
                 return JSONResponse({"error": "用户不存在"}, status_code=404)
 
+            if nickname and nickname != user["nickname"]:
+                existing = await recorder.get_user_by_nickname(nickname)
+                if existing and existing["id"] != user["id"]:
+                    return JSONResponse({"error": "该昵称已被使用"}, status_code=409)
+
             await recorder.update_user_profile(user["id"], nickname=nickname, theme=theme)
             return {"status": "success"}
         except Exception as e:
@@ -958,6 +1000,210 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
         except Exception as e:
             logging(lambda: print, f"头像上传失败: {e}", ERROR)
             return JSONResponse({"error": str(e)}, status_code=500)
+
+    # ---- 跨用户浏览 & 导入 ----
+
+    @app.get("/web/api/user/search")
+    async def search_users(
+        q: str = Query(..., description="搜索关键词"),
+        token: str = Query("", description="用户令牌"),
+    ):
+        exclude_id = None
+        if token:
+            user_data = await recorder.get_user_by_token(token)
+            if user_data:
+                exclude_id = user_data["id"]
+        results = await recorder.search_users(q, exclude_id)
+        return results
+
+    @app.get("/web/api/user/{target_id}/history")
+    async def get_user_history(
+        target_id: int,
+        token: str = Query("", description="用户令牌"),
+    ):
+        if not token:
+            return JSONResponse({"error": "需要登录"}, status_code=401)
+        user_data = await recorder.get_user_by_token(token)
+        if not user_data:
+            return JSONResponse({"error": "无效令牌"}, status_code=401)
+        return await recorder.get_history(user_id=target_id)
+
+    @app.post("/web/api/import/notes")
+    async def import_notes(payload: dict = Body(...)):
+        token = payload.get("token", "")
+        source_user_id = payload.get("source_user_id")
+        note_ids = payload.get("note_ids", [])
+        if not token:
+            return JSONResponse({"error": "需要登录"}, status_code=401)
+        user_data = await recorder.get_user_by_token(token)
+        if not user_data:
+            return JSONResponse({"error": "无效令牌"}, status_code=401)
+        target_user_id = user_data["id"]
+        if target_user_id == source_user_id:
+            return JSONResponse({"error": "不能从自己导入"}, status_code=400)
+        if not note_ids:
+            return JSONResponse({"error": "未选择作品"}, status_code=400)
+        result = await recorder.import_notes(note_ids, source_user_id, target_user_id)
+        return {"status": "success", **result}
+
+    # ---- 站内用户私信 API ----
+
+    async def _get_user_id_from_token(token: str):
+        if not token:
+            return None
+        user_data = await recorder.get_user_by_token(token)
+        return user_data["id"] if user_data else None
+
+    @app.post("/web/api/user/message")
+    async def send_user_message(payload: dict = Body(...)):
+        token = payload.get("token", "")
+        receiver_id = payload.get("receiver_id")
+        content = payload.get("content", "").strip()
+        sender_id = await _get_user_id_from_token(token)
+        if not sender_id:
+            return JSONResponse({"error": "需要登录"}, status_code=401)
+        if not receiver_id or not content:
+            return JSONResponse({"error": "缺少参数"}, status_code=400)
+        if sender_id == receiver_id:
+            return JSONResponse({"error": "不能给自己发消息"}, status_code=400)
+        msg_id = await recorder.send_user_message(sender_id, int(receiver_id), content)
+        return {"status": "success", "id": msg_id}
+
+    @app.get("/web/api/user/messages")
+    async def get_user_messages(
+        peer_id: int = Query(...),
+        token: str = Query(""),
+    ):
+        user_id = await _get_user_id_from_token(token)
+        if not user_id:
+            return JSONResponse({"error": "需要登录"}, status_code=401)
+        messages = await recorder.get_user_messages(user_id, peer_id)
+        await recorder.mark_messages_read(user_id, peer_id)
+        return messages
+
+    @app.delete("/web/api/user/message/{message_id}")
+    async def delete_user_message(
+        message_id: int,
+        token: str = Query(""),
+    ):
+        user_id = await _get_user_id_from_token(token)
+        if not user_id:
+            return JSONResponse({"error": "需要登录"}, status_code=401)
+        await recorder.delete_user_message(message_id, user_id)
+        return {"status": "success"}
+
+    @app.post("/web/api/user/messages/read")
+    async def mark_user_messages_read(payload: dict = Body(...)):
+        token = payload.get("token", "")
+        peer_id = payload.get("peer_id")
+        user_id = await _get_user_id_from_token(token)
+        if not user_id:
+            return JSONResponse({"error": "需要登录"}, status_code=401)
+        if not peer_id:
+            return JSONResponse({"error": "缺少参数"}, status_code=400)
+        await recorder.mark_messages_read(user_id, int(peer_id))
+        return {"status": "success"}
+
+    @app.get("/web/api/user/messages/poll")
+    async def poll_user_messages(
+        peer_id: int = Query(...),
+        after_id: int = Query(0),
+        token: str = Query(""),
+    ):
+        user_id = await _get_user_id_from_token(token)
+        if not user_id:
+            return JSONResponse({"error": "需要登录"}, status_code=401)
+        messages = await recorder.get_new_user_messages(user_id, peer_id, after_id)
+        if messages:
+            await recorder.mark_messages_read(user_id, peer_id)
+        return messages
+
+    @app.get("/web/api/user/conversations")
+    async def get_user_conversations(token: str = Query("")):
+        user_id = await _get_user_id_from_token(token)
+        if not user_id:
+            return JSONResponse({"error": "需要登录"}, status_code=401)
+        return await recorder.get_conversations(user_id)
+
+    @app.get("/web/api/user/unread-count")
+    async def get_unread_count(token: str = Query("")):
+        user_id = await _get_user_id_from_token(token)
+        if not user_id:
+            return {"count": 0}
+        count = await recorder.get_unread_count(user_id)
+        return {"count": count}
+
+    # ---- 用户关注 API ----
+
+    @app.post("/web/api/user/follow")
+    async def follow_user(payload: dict = Body(...)):
+        token = payload.get("token", "")
+        target_id = payload.get("target_id")
+        user_id = await _get_user_id_from_token(token)
+        if not user_id:
+            return JSONResponse({"error": "需要登录"}, status_code=401)
+        if not target_id:
+            return JSONResponse({"error": "缺少参数"}, status_code=400)
+        if user_id == int(target_id):
+            return JSONResponse({"error": "不能关注自己"}, status_code=400)
+        await recorder.follow_user(user_id, int(target_id))
+        return {"status": "success"}
+
+    @app.delete("/web/api/user/follow")
+    async def unfollow_user(
+        target_id: int = Query(...),
+        token: str = Query(""),
+    ):
+        user_id = await _get_user_id_from_token(token)
+        if not user_id:
+            return JSONResponse({"error": "需要登录"}, status_code=401)
+        await recorder.unfollow_user(user_id, target_id)
+        return {"status": "success"}
+
+    @app.get("/web/api/user/following")
+    async def get_following_list(token: str = Query("")):
+        user_id = await _get_user_id_from_token(token)
+        if not user_id:
+            return JSONResponse({"error": "需要登录"}, status_code=401)
+        return await recorder.get_following_list(user_id)
+
+    @app.get("/web/api/user/follow/check")
+    async def check_follow_status(
+        target_id: int = Query(...),
+        token: str = Query(""),
+    ):
+        user_id = await _get_user_id_from_token(token)
+        if not user_id:
+            return {"is_following": False}
+        is_following = await recorder.is_following(user_id, target_id)
+        return {"is_following": is_following}
+
+    # ---- 站内用户主页 API ----
+
+    @app.get("/web/api/user/{target_id}/profile")
+    async def get_site_user_profile(
+        target_id: int,
+        token: str = Query(""),
+    ):
+        user_id = await _get_user_id_from_token(token)
+        target_user = await recorder.get_user_by_id(target_id)
+        if not target_user:
+            return JSONResponse({"error": "用户不存在"}, status_code=404)
+        counts = await recorder.get_follow_counts(target_id)
+        is_following = False
+        if user_id:
+            is_following = await recorder.is_following(user_id, target_id)
+        works = await recorder.get_history(user_id=target_id)
+        return {
+            "id": target_user["id"],
+            "nickname": target_user["nickname"],
+            "avatar_url": target_user["avatar_url"],
+            "following_count": counts["following_count"],
+            "followers_count": counts["followers_count"],
+            "is_following": is_following,
+            "work_count": len(works),
+            "works": works,
+        }
 
     return app
 

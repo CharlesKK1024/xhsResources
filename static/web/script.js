@@ -174,6 +174,21 @@ class XHSWebUI {
         });
         this.fetchBtn.addEventListener('click', () => this.fetchNote(false));
         this.refreshBtn.addEventListener('click', () => this.fetchNote(true));
+        document.getElementById('browseUsersBtn')?.addEventListener('click', () => {
+            if (window.UserBrowser) {
+                if (window.UserBrowser.isOpen()) {
+                    window.UserBrowser.close();
+                } else {
+                    this.hideAll();
+                    window.UserBrowser.open(this);
+                }
+            }
+        });
+        document.getElementById('msgStationBtn')?.addEventListener('click', () => {
+            if (window.MessageStation) {
+                window.MessageStation.open(this);
+            }
+        });
         this.urlInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
@@ -564,8 +579,9 @@ class XHSWebUI {
     async loadInitialData() {
         this.loadSettings();
         await this.initUser();
-        // 默认页面是作品集，执行页面切换逻辑（控制按钮显隐等）
-        this.switchPage('history-page');
+        if (this.token) {
+            this.switchPage('history-page');
+        }
     }
 
     loadSettings() {
@@ -651,8 +667,9 @@ class XHSWebUI {
         if (!images || images.length === 0) return;
         this.viewerList = images;
         this.viewerIndex = startIndex;
+        this.fullViewer.style.zIndex = window.nextOverlayZ();
         this.fullViewer.style.display = 'flex';
-        document.body.style.overflow = 'hidden'; // 禁止背景滚动
+        document.body.style.overflow = 'hidden';
         this.updateViewerImage();
     }
 
@@ -1142,6 +1159,7 @@ class XHSWebUI {
     }
 
     closeNoteDetail() {
+        this.closeViewer();
         const source = this._noteDetailSourceEl;
         const coverImg = source && source.querySelector('.item-cover img, .ap-work-cover img');
         if (coverImg) {
@@ -1958,7 +1976,8 @@ class XHSWebUI {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     note_id: this.currentNote.id,
-                    data: this.currentNote
+                    data: this.currentNote,
+                    token: this.token
                 })
             });
         } catch (e) {
@@ -1974,7 +1993,7 @@ class XHSWebUI {
             await fetch('/web/api/star', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ note_id: this.currentNote.id, is_starred: newState })
+                body: JSON.stringify({ note_id: this.currentNote.id, is_starred: newState, token: this.token })
             });
             this.updateStarBtn(newState === 1);
             this._collectionLoaded = false;
@@ -2650,7 +2669,7 @@ class XHSWebUI {
                         const title = note.title || '无标题';
                         if (!confirm(`确定要删除作品「${title}」吗？\n此操作不可恢复。`)) return;
                         try {
-                            const resp = await fetch(`/web/api/history/${note.id}`, { method: 'DELETE' });
+                            const resp = await fetch(`/web/api/history/${note.id}?token=${encodeURIComponent(this.token)}`, { method: 'DELETE' });
                             if (resp.ok) {
                                 card.remove();
                                 if (wrapper.children.length === 0) row.remove();
@@ -2813,6 +2832,9 @@ class XHSWebUI {
                     this.userTheme = user.theme || 'dark';
                     this.applyUserTheme();
                     this.showUserWidget(user);
+                    const msgBtn = document.getElementById('msgStationBtn');
+                    if (msgBtn) msgBtn.style.display = '';
+                    if (window.MessageStation) window.MessageStation.startBadgePolling();
                     return;
                 }
                 if (resp.status === 401 || resp.status === 403) {
@@ -2897,8 +2919,11 @@ class XHSWebUI {
             this.applyUserTheme();
             this.showUserWidget(user);
             this.loginModal.style.display = 'none';
-            // 登录后自动跳转到作品集并加载数据
+            this._resetUserData();
             this.switchPage('history-page');
+            const msgBtn = document.getElementById('msgStationBtn');
+            if (msgBtn) msgBtn.style.display = '';
+            if (window.MessageStation) window.MessageStation.startBadgePolling();
         } catch (e) {
             if (this.loginError) {
                 this.loginError.textContent = e.message;
@@ -3013,13 +3038,19 @@ class XHSWebUI {
                     theme: this.userTheme,
                 }),
             });
-            if (!resp.ok) throw new Error('保存失败');
+            if (!resp.ok) {
+                const data = await resp.json().catch(() => ({}));
+                const msg = data.error || '保存失败';
+                if (window.showTip) window.showTip(msg, 'error');
+                return;
+            }
             this.currentUser.nickname = nickname;
             this.currentUser.theme = this.userTheme;
             this.showUserWidget(this.currentUser);
             this.hideProfile();
+            if (window.showTip) window.showTip('保存成功', 'success', 2000);
         } catch (e) {
-            alert('保存失败: ' + e.message);
+            if (window.showTip) window.showTip('保存失败: ' + e.message, 'error');
         }
     }
 
@@ -3028,9 +3059,31 @@ class XHSWebUI {
         localStorage.removeItem('xhs_token');
         this.token = '';
         this.currentUser = null;
+        this._resetUserData();
         this.hideProfile();
         if (this.userWidget) this.userWidget.style.display = 'none';
+        const msgBtn = document.getElementById('msgStationBtn');
+        if (msgBtn) msgBtn.style.display = 'none';
+        if (window.MessageStation) window.MessageStation.stopBadgePolling();
         this.showLogin();
+    }
+
+    _resetUserData() {
+        this._historyData = null;
+        this._historyLoaded = false;
+        this._collectionLoaded = false;
+        this._historyTagCount = null;
+        this._authorAvatarCache = {};
+        this.currentNote = null;
+        if (this.historyList) this.historyList.innerHTML = '';
+        if (this.collectionList) this.collectionList.innerHTML = '';
+        if (this.result) this.result.style.display = 'none';
+        if (this.loading) this.loading.style.display = 'none';
+        if (this.error) this.error.style.display = 'none';
+        if (this.swipeInstances) {
+            this.swipeInstances.forEach(s => { if (s && s.destroy) s.destroy(); });
+            this.swipeInstances = [];
+        }
     }
 
     async uploadAvatar(e) {
@@ -3190,6 +3243,8 @@ class XHSWebUI {
         if (this.loading) this.loading.style.display = 'none';
         if (this.result) this.result.style.display = 'none';
         if (this.error) this.error.style.display = 'none';
+        if (window.UserBrowser && window.UserBrowser.isOpen()) window.UserBrowser.close();
+        if (window.MessageStation && window.MessageStation.isOpen()) window.MessageStation.close();
     }
 
     formatNum(n) {

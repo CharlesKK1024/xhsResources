@@ -1,0 +1,82 @@
+.xhs-tip {
+    position: fixed;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%) translateY(-100%);
+    z-index: 99998;
+    display: flex;
+    align-items: center;
+    gap: 1.5vw;
+    padding: 1.2vh 4vw;
+    border-radius: 0 0 1.2vh 1.2vh;
+    font-size: 1.4vh;
+    font-weight: 500;
+    pointer-events: none;
+    opacity: 0;
+    transition: transform 0.35s cubic-bezier(0.23, 1, 0.32, 1), opacity 0.35s ease;
+    max-width: 90vw;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+    will-change: transform, opacity;
+}
+
+.xhs-tip--visible {
+    transform: translateX(-50%) translateY(0);
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.xhs-tip__icon {
+    font-size: 1.8vh;
+    flex-shrink: 0;
+}
+
+.xhs-tip__text {
+    flex: 1;
+    line-height: 1.4;
+}
+
+.xhs-tip__close {
+    background: none;
+    border: none;
+    font-size: 1.6vh;
+    cursor: pointer;
+    padding: 0 0.5vw;
+    opacity: 0.6;
+    flex-shrink: 0;
+}
+
+.xhs-tip__close:hover {
+    opacity: 1;
+}
+
+/* Types */
+.xhs-tip--error {
+    background-color: #ff4d4f;
+    color: #fff;
+}
+.xhs-tip--error .xhs-tip__close { color: #fff; }
+
+.xhs-tip--success {
+    background-color: #52c41a;
+    color: #fff;
+}
+.xhs-tip--success .xhs-tip__close { color: #fff; }
+
+.xhs-tip--warning {
+    background-color: #faad14;
+    color: #fff;
+}
+.xhs-tip--warning .xhs-tip__close { color: #fff; }
+
+.xhs-tip--info {
+    background-color: #1890ff;
+    color: #fff;
+}
+.xhs-tip--info .xhs-tip__close { color: #fff; }
+
+/* Safe area for notch devices */
+@supports (padding-top: env(safe-area-inset-top)) {
+    .xhs-tip {
+        padding-top: calc(1.2vh + env(safe-area-inset-top));
+    }
+}

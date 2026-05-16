@@ -238,27 +238,42 @@
     border-top-color: #333;
 }
 
-/* ========== Context Menu (long-press delete) ========== */
+/* ========== Context Menu (long-press) ========== */
 .chat-context-menu {
     position: fixed;
     background: var(--card-bg);
     border: 1px solid var(--border-color);
-    border-radius: 1vh;
-    box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+    border-radius: 1.2vh;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.18);
     z-index: 99990;
-    padding: 0.5vh 0;
-    min-width: 20vw;
+    padding: 1vh 2vw;
+    display: flex;
+    gap: 3vw;
 }
 
 .chat-context-item {
-    padding: 1vh 4vw;
-    font-size: 1.4vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.4vh;
     cursor: pointer;
-    white-space: nowrap;
-    text-align: center;
+    padding: 0.5vh 1.5vw;
+    border-radius: 0.8vh;
+    transition: background 0.15s;
 }
 
-.chat-context-item.ctx-delete {
+.chat-context-item .ctx-icon {
+    font-size: 2.2vh;
+    line-height: 1;
+}
+
+.chat-context-item .ctx-label {
+    font-size: 1vh;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.chat-context-item.ctx-delete .ctx-label {
     color: #ff4d4f;
 }
 
@@ -440,7 +455,7 @@
 [data-theme="dark"] .chat-context-menu {
     background-color: #2a2a2a;
     border-color: #444;
-    box-shadow: 0 2px 12px rgba(0,0,0,0.4);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
 }
 
 [data-theme="dark"] .chat-note-picker {

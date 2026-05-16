@@ -49,6 +49,7 @@
       <!-- 顶部操作栏 -->
       <div class="top-header-actions">
         <button id="pageRefreshBtn" class="action-btn refresh-page-btn" title="刷新页面">🔄</button>
+        <button id="msgStationBtn" class="action-btn msg-station-btn" title="信息站" style="display: none">💬<span id="msgBadge" class="msg-badge" style="display: none">0</span></button>
         <!-- 用户信息 -->
         <div id="userWidget" class="user-widget" style="display: none">
           <div class="user-avatar-wrap">
@@ -110,6 +111,7 @@
               <button id="fetchBtn" class="fetch-btn">
                 <span class="btn-icon">🚀</span> 获取信息
               </button>
+              <button id="browseUsersBtn" class="browse-users-icon-btn" title="搜索站内用户">👥</button>
             </div>
             <button
               id="refreshBtn"
@@ -123,6 +125,10 @@
           </div>
 
           <div class="extract-scroll-area">
+            <div id="userBrowserContainer" class="ub-container" style="display: none">
+              <!-- 由 userBrowser.js 动态填充 -->
+            </div>
+
             <div id="loading" class="loading" style="display: none">
               <!-- 由 tools.js 动态生成 -->
             </div>
@@ -423,17 +429,23 @@
       </div>
     </div>
 
-    <link rel="stylesheet" href="/web/static/componentUtils/authorProfile.css">
-    <link rel="stylesheet" href="/web/static/componentUtils/chatUI.css">
+    <link rel="stylesheet" href="/web/static/componentUtils/authorProfile/authorProfile.css">
+    <link rel="stylesheet" href="/web/static/componentUtils/chatUI/chatUI.css">
+    <link rel="stylesheet" href="/web/static/componentUtils/messageStation/messageStation.css">
+    <link rel="stylesheet" href="/web/static/componentUtils/tips/tips.css">
+    <link rel="stylesheet" href="/web/static/componentUtils/userBrowser/userBrowser.css">
 
     <script src="/web/static/lib/echarts.min.js"></script>
     <script src="/web/static/lib/china.js"></script>
     <script src="/web/static/utils/swipe.js"></script>
     <script src="/web/static/utils/svg.js"></script>
     <script src="/web/static/utils/tools.js"></script>
-    <script src="/web/static/componentUtils/toast.js"></script>
-    <script src="/web/static/componentUtils/authorProfile.js"></script>
-    <script src="/web/static/componentUtils/chatUI.js"></script>
+    <script src="/web/static/componentUtils/toast/toast.js"></script>
+    <script src="/web/static/componentUtils/tips/tips.js"></script>
+    <script src="/web/static/componentUtils/authorProfile/authorProfile.js"></script>
+    <script src="/web/static/componentUtils/chatUI/chatUI.js"></script>
+    <script src="/web/static/componentUtils/messageStation/messageStation.js"></script>
+    <script src="/web/static/componentUtils/userBrowser/userBrowser.js"></script>
     <script src="/web/static/script.js"></script>
   </body>
 </html>

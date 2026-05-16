@@ -11,6 +11,12 @@
     var noteCache = {};
     var pickerDebounceTimer = null;
 
+    var currentMode = 'author';
+    var currentPeerId = null;
+    var pollTimer = null;
+    var lastMessageId = 0;
+    var lastRawTime = null;
+
     var REACTIONS = [
         { emoji: '🐱', label: '棒' },
         { emoji: '😹', label: '笑哭了' },
@@ -230,9 +236,9 @@
         '</div>';
     }
 
-    // ========== Long Press Delete ==========
+    // ========== Long Press Context Menu ==========
 
-    function bindLongPress(msgEl, messageId) {
+    function bindLongPress(msgEl, messageId, isSelf) {
         var timer = null;
         var startX = 0, startY = 0;
 
@@ -241,7 +247,7 @@
             startX = point.clientX;
             startY = point.clientY;
             timer = setTimeout(function () {
-                showContextMenu(msgEl, messageId);
+                showContextMenu(msgEl, messageId, isSelf);
             }, 500);
         }
 
@@ -268,17 +274,71 @@
         msgEl.addEventListener('mouseup', onEnd);
     }
 
-    function showContextMenu(msgEl, messageId) {
+    function getMessageText(msgEl) {
+        var bubble = msgEl.querySelector('.chat-msg-bubble');
+        if (bubble) return bubble.textContent || '';
+        var card = msgEl.querySelector('.chat-note-card');
+        if (card) {
+            var title = card.querySelector('.chat-note-card-title');
+            return title ? title.textContent : '[笔记卡片]';
+        }
+        return '';
+    }
+
+    function showContextMenu(msgEl, messageId, isSelf) {
         hideContextMenu();
 
         contextMenu = document.createElement('div');
         contextMenu.className = 'chat-context-menu';
-        contextMenu.innerHTML = '<div class="chat-context-item ctx-delete">删除</div>';
 
-        contextMenu.querySelector('.ctx-delete').onclick = function (e) {
+        var items = [
+            { icon: '📋', label: '复制', cls: 'ctx-copy' },
+            { icon: '↩️', label: '引用', cls: 'ctx-quote' },
+        ];
+        if (isSelf && messageId) {
+            items.push({ icon: '🗑️', label: '删除', cls: 'ctx-delete' });
+        }
+
+        contextMenu.innerHTML = items.map(function (it) {
+            return '<div class="chat-context-item ' + it.cls + '">' +
+                '<span class="ctx-icon">' + it.icon + '</span>' +
+                '<span class="ctx-label">' + it.label + '</span>' +
+            '</div>';
+        }).join('');
+
+        contextMenu.querySelector('.ctx-copy').onclick = function (e) {
             e.stopPropagation();
-            deleteMessage(msgEl, messageId);
+            var text = getMessageText(msgEl);
+            if (text && navigator.clipboard) {
+                navigator.clipboard.writeText(text).then(function () {
+                    if (window.showToast) window.showToast('已复制');
+                });
+            } else if (text) {
+                var ta = document.createElement('textarea');
+                ta.value = text;
+                ta.style.cssText = 'position:fixed;left:-9999px';
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+                if (window.showToast) window.showToast('已复制');
+            }
+            hideContextMenu();
         };
+
+        contextMenu.querySelector('.ctx-quote').onclick = function (e) {
+            e.stopPropagation();
+            quoteMessage(msgEl);
+            hideContextMenu();
+        };
+
+        var delBtn = contextMenu.querySelector('.ctx-delete');
+        if (delBtn) {
+            delBtn.onclick = function (e) {
+                e.stopPropagation();
+                deleteMessage(msgEl, messageId);
+            };
+        }
 
         var rect = msgEl.querySelector('.chat-msg-bubble, .chat-note-card');
         if (!rect) rect = msgEl;
@@ -299,6 +359,18 @@
         contextMenu.style.top = top + 'px';
     }
 
+    function quoteMessage(msgEl) {
+        if (!overlay) return;
+        var text = getMessageText(msgEl);
+        if (!text) return;
+        var input = overlay.querySelector('.chat-input');
+        var quoted = '「' + (text.length > 40 ? text.substring(0, 40) + '...' : text) + '」\n';
+        input.value = quoted;
+        input.focus();
+        var sendBtn = overlay.querySelector('.chat-send-btn');
+        if (sendBtn) sendBtn.classList.add('can-send');
+    }
+
     function hideContextMenu() {
         if (contextMenu && contextMenu.parentNode) {
             contextMenu.parentNode.removeChild(contextMenu);
@@ -310,10 +382,10 @@
         hideContextMenu();
 
         try {
-            var resp = await fetch(
-                '/web/api/author/message/' + messageId + '?token=' + encodeURIComponent(token),
-                { method: 'DELETE' }
-            );
+            var url = currentMode === 'user'
+                ? '/web/api/user/message/' + messageId + '?token=' + encodeURIComponent(token)
+                : '/web/api/author/message/' + messageId + '?token=' + encodeURIComponent(token);
+            var resp = await fetch(url, { method: 'DELETE' });
             if (resp.ok) {
                 var prev = msgEl.previousElementSibling;
                 if (prev && prev.classList.contains('chat-time-divider')) {
@@ -365,6 +437,17 @@
                         }
                         return;
                     }
+                }
+            }
+            var resp2 = await fetch('/web/api/note/lookup?note_id=' + encodeURIComponent(noteId));
+            if (resp2.ok) {
+                var noteData = await resp2.json();
+                if (noteData && noteData.id) {
+                    noteCache[noteId] = noteData;
+                    if (window.xhsApp && window.xhsApp.openNoteDetail) {
+                        window.xhsApp.openNoteDetail(noteData, cardEl);
+                    }
+                    return;
                 }
             }
             if (window.showToast) window.showToast('找不到该笔记');
@@ -467,7 +550,8 @@
     }
 
     async function sendNoteCard(note) {
-        if (!currentAuthorId) return;
+        if (currentMode === 'user' && !currentPeerId) return;
+        if (currentMode === 'author' && !currentAuthorId) return;
 
         var cardData = {
             type: 'note_card',
@@ -490,18 +574,25 @@
         scrollToBottom();
 
         try {
-            var resp = await fetch('/web/api/author/message', {
+            var url, body;
+            if (currentMode === 'user') {
+                url = '/web/api/user/message';
+                body = { receiver_id: currentPeerId, content: content, token: token };
+            } else {
+                url = '/web/api/author/message';
+                body = { author_id: currentAuthorId, content: content, token: token };
+            }
+            var resp = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    author_id: currentAuthorId,
-                    content: content,
-                    token: token,
-                }),
+                body: JSON.stringify(body),
             });
             var result = await resp.json();
             if (result && result.status === 'success') {
-                bindLongPress(msgEl, result.id || 0);
+                bindLongPress(msgEl, result.id || 0, true);
+                if (result.id && result.id > lastMessageId) {
+                    lastMessageId = result.id;
+                }
             }
         } catch (e) {
             if (window.showToast) window.showToast('发送失败');
@@ -511,7 +602,9 @@
     // ========== Core Functions ==========
 
     async function open(authorId, authorName, avatarUrl) {
+        currentMode = 'author';
         currentAuthorId = authorId;
+        currentPeerId = null;
         currentAuthorName = authorName;
         currentAvatarUrl = avatarUrl || '';
         token = localStorage.getItem('xhs_token') || '';
@@ -528,6 +621,7 @@
         el.querySelector('.chat-send-btn').classList.remove('can-send');
         hideNotePicker();
         hideContextMenu();
+        stopPolling();
 
         el.classList.add('chat-visible');
         document.body.style.overflow = 'hidden';
@@ -537,15 +631,51 @@
         await loadMessages();
     }
 
+    async function openUserChat(peerId, peerName, peerAvatar) {
+        currentMode = 'user';
+        currentPeerId = peerId;
+        currentAuthorId = null;
+        currentAuthorName = peerName;
+        currentAvatarUrl = peerAvatar || '';
+        token = localStorage.getItem('xhs_token') || '';
+        lastMessageId = 0;
+
+        var el = getOrCreateOverlay();
+        el.style.zIndex = window.nextOverlayZ();
+        el.querySelector('.chat-title').textContent = peerName;
+
+        var avatarImg = el.querySelector('.chat-avatar-small');
+        avatarImg.src = peerAvatar ? getMediaUrl(peerAvatar) : '';
+
+        el.querySelector('.chat-messages').innerHTML = '';
+        el.querySelector('.chat-input').value = '';
+        el.querySelector('.chat-send-btn').classList.remove('can-send');
+        hideNotePicker();
+        hideContextMenu();
+
+        el.classList.add('chat-visible');
+        document.body.style.overflow = 'hidden';
+
+        bindNoteCardClick(el.querySelector('.chat-messages'));
+
+        await loadMessages();
+        startPolling();
+    }
+
     async function loadMessages() {
-        if (!currentAuthorId) return;
         var messagesEl = overlay.querySelector('.chat-messages');
 
         try {
-            var resp = await fetch(
-                '/web/api/author/messages?author_id=' + encodeURIComponent(currentAuthorId) +
-                '&token=' + encodeURIComponent(token)
-            );
+            var url;
+            if (currentMode === 'user') {
+                if (!currentPeerId) return;
+                url = '/web/api/user/messages?peer_id=' + currentPeerId + '&token=' + encodeURIComponent(token);
+            } else {
+                if (!currentAuthorId) return;
+                url = '/web/api/author/messages?author_id=' + encodeURIComponent(currentAuthorId) + '&token=' + encodeURIComponent(token);
+            }
+
+            var resp = await fetch(url);
             var messages = await resp.json();
 
             if (!messages || !messages.length) {
@@ -575,13 +705,18 @@
 
                 msgEl.innerHTML = avatarHtml + renderMessageContent(msg.content);
 
-                if (msg.is_self && msg.id) {
-                    bindLongPress(msgEl, msg.id);
+                if (msg.id) {
+                    bindLongPress(msgEl, msg.id, msg.is_self);
                 }
 
                 messagesEl.appendChild(msgEl);
+
+                if (msg.id && msg.id > lastMessageId) {
+                    lastMessageId = msg.id;
+                }
             });
 
+            lastRawTime = lastTime;
             scrollToBottom();
         } catch (e) {
             messagesEl.innerHTML = '<div class="chat-empty">加载消息失败</div>';
@@ -591,7 +726,9 @@
     async function sendMessage() {
         var input = overlay.querySelector('.chat-input');
         var content = input.value.trim();
-        if (!content || !currentAuthorId) return;
+        if (!content) return;
+        if (currentMode === 'user' && !currentPeerId) return;
+        if (currentMode === 'author' && !currentAuthorId) return;
 
         input.value = '';
         overlay.querySelector('.chat-send-btn').classList.remove('can-send');
@@ -607,18 +744,25 @@
         scrollToBottom();
 
         try {
-            var resp = await fetch('/web/api/author/message', {
+            var url, body;
+            if (currentMode === 'user') {
+                url = '/web/api/user/message';
+                body = { receiver_id: currentPeerId, content: content, token: token };
+            } else {
+                url = '/web/api/author/message';
+                body = { author_id: currentAuthorId, content: content, token: token };
+            }
+            var resp = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    author_id: currentAuthorId,
-                    content: content,
-                    token: token,
-                }),
+                body: JSON.stringify(body),
             });
             var result = await resp.json();
             if (result && result.status === 'success') {
-                bindLongPress(msgEl, result.id || 0);
+                bindLongPress(msgEl, result.id || 0, true);
+                if (result.id && result.id > lastMessageId) {
+                    lastMessageId = result.id;
+                }
             }
         } catch (e) {
             if (window.showToast) window.showToast('发送失败');
@@ -664,6 +808,7 @@
     }
 
     function close() {
+        stopPolling();
         if (overlay) {
             overlay.classList.remove('chat-visible');
             hideNotePicker();
@@ -673,14 +818,80 @@
             }
         }
         currentAuthorId = null;
+        currentPeerId = null;
+        currentMode = 'author';
     }
 
     function isOpen() {
         return overlay && overlay.classList.contains('chat-visible');
     }
 
+    function startPolling() {
+        stopPolling();
+        pollTimer = setInterval(async function () {
+            if (currentMode !== 'user' || !currentPeerId) return;
+            try {
+                var resp = await fetch(
+                    '/web/api/user/messages/poll?peer_id=' + currentPeerId +
+                    '&after_id=' + lastMessageId +
+                    '&token=' + encodeURIComponent(token)
+                );
+                var newMsgs = await resp.json();
+                if (newMsgs && newMsgs.length) {
+                    appendNewMessages(newMsgs);
+                }
+            } catch (e) {}
+        }, 3000);
+    }
+
+    function stopPolling() {
+        if (pollTimer) {
+            clearInterval(pollTimer);
+            pollTimer = null;
+        }
+    }
+
+    function appendNewMessages(messages) {
+        if (!overlay) return;
+        var messagesEl = overlay.querySelector('.chat-messages');
+        var empty = messagesEl.querySelector('.chat-empty');
+        if (empty) empty.remove();
+
+        messages.forEach(function (msg) {
+            if (msg.id <= lastMessageId) return;
+
+            if (msg.time && shouldShowTime(lastRawTime, msg.time)) {
+                var divider = document.createElement('div');
+                divider.className = 'chat-time-divider';
+                divider.textContent = formatTime(msg.time);
+                messagesEl.appendChild(divider);
+            }
+            lastRawTime = msg.time;
+
+            var msgEl = document.createElement('div');
+            msgEl.className = 'chat-msg ' + (msg.is_self ? 'msg-self' : 'msg-other');
+
+            var avatarSrc = msg.is_self ? '' : getMediaUrl(currentAvatarUrl);
+            var avatarHtml = avatarSrc
+                ? '<img class="chat-msg-avatar" src="' + avatarSrc + '" referrerpolicy="no-referrer">'
+                : '';
+
+            msgEl.innerHTML = avatarHtml + renderMessageContent(msg.content);
+
+            if (msg.id) {
+                bindLongPress(msgEl, msg.id, msg.is_self);
+            }
+
+            messagesEl.appendChild(msgEl);
+            lastMessageId = msg.id;
+        });
+
+        scrollToBottom();
+    }
+
     window.ChatUI = {
         open: open,
+        openUserChat: openUserChat,
         close: close,
         isOpen: isOpen,
     };
