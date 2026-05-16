@@ -17,6 +17,18 @@
   <body>
     <div class="app-container">
       <aside class="sidebar">
+        <!-- 作品集筛选栏 (动态显隐) -->
+        <div id="historyControls" class="sidebar-filter">
+          <span class="filter-bar-title">作品集</span>
+          <input type="text" id="historySearch" class="filter-bar-search" placeholder="搜索..." />
+          <select id="historySort" class="filter-bar-sort">
+            <option value="time_desc">新→旧</option>
+            <option value="time_asc">旧→新</option>
+            <option value="author">按作者</option>
+            <option value="count_desc">作品多→少</option>
+            <option value="count_asc">作品少→多</option>
+          </select>
+        </div>
         <div class="logo">
           <span class="logo-icon">📕</span>
           <h1 class="logo-text">XHS-Downloader</h1>
@@ -47,15 +59,6 @@
           </div>
         </div>
         <!-- 作品集搜索/排序 (仅作品集页面显示) -->
-        <div id="historyControls" class="header-sub-row">
-          <span class="header-page-title">作品集</span>
-          <input type="text" id="historySearch" class="header-search" placeholder="搜索..." />
-          <select id="historySort" class="header-sort">
-            <option value="time_desc">新→旧</option>
-            <option value="time_asc">旧→新</option>
-            <option value="author">按作者</option>
-          </select>
-        </div>
         <div id="cardScaler" class="scaler-popup" style="display: none">
           <span class="scaler-label">卡片缩放</span>
           <input type="range" id="scaleRange" min="-80" max="150" value="0" />
@@ -91,7 +94,7 @@
             <div class="input-group">
               <textarea
                 id="urlInput"
-                placeholder="粘贴小红书作品链接..."
+                placeholder="粘贴作品链接 / 作者主页链接 / 输入作者名搜索..."
                 class="url-input"
                 rows="2"
               ></textarea>
@@ -313,6 +316,7 @@
           <span id="noteAuthorName" class="note-author-name"></span>
         </div>
         <div class="note-detail-actions">
+          <button id="noteOriginalLink" class="note-original-btn" title="查看原帖">🔗</button>
           <button class="note-follow-btn">关注</button>
           <button id="noteShareBtn" class="note-share-btn"></button>
         </div>
@@ -414,10 +418,15 @@
       </div>
     </div>
 
+    <link rel="stylesheet" href="/web/static/componentUtils/authorProfile.css">
+    <link rel="stylesheet" href="/web/static/componentUtils/chatUI.css">
+
     <script src="/web/static/utils/swipe.js"></script>
     <script src="/web/static/utils/svg.js"></script>
     <script src="/web/static/utils/tools.js"></script>
     <script src="/web/static/componentUtils/toast.js"></script>
+    <script src="/web/static/componentUtils/authorProfile.js"></script>
+    <script src="/web/static/componentUtils/chatUI.js"></script>
     <script src="/web/static/script.js"></script>
   </body>
 </html>

@@ -138,12 +138,11 @@ class XHSWebUI {
         this._initScrollRail();
         this._fixIOSInputZoom();
 
-        // 作品集页面默认展开子栏
+        // 作品集页面默认展开底部筛选栏
         const historyControls = document.getElementById('historyControls');
         const activeNav = document.querySelector('.nav-item.active');
         if (historyControls && activeNav && activeNav.dataset.target === 'history-page') {
             historyControls.classList.add('visible');
-            document.querySelector('.main-content').classList.add('header-expanded');
         }
 
         // 刷新按钮
@@ -586,16 +585,13 @@ class XHSWebUI {
             page.classList.toggle('active', page.id === targetId);
         });
 
-        // 作品集搜索/排序显隐控制（带动画）
+        // 作品集搜索/排序显隐控制（底部筛选栏动画）
         const historyControls = document.getElementById('historyControls');
-        const mainContent = document.querySelector('.main-content');
         if (historyControls) {
             if (targetId === 'history-page') {
-                historyControls.classList.add('visible');
-                mainContent.classList.add('header-expanded');
+                setTimeout(() => historyControls.classList.add('visible'), 350);
             } else {
                 historyControls.classList.remove('visible');
-                mainContent.classList.remove('header-expanded');
             }
         }
 
@@ -616,8 +612,8 @@ class XHSWebUI {
             }
         }
 
-        if (targetId === 'history-page') this.loadHistory();
-        if (targetId === 'collection-page') this.loadCollections();
+        if (targetId === 'history-page' && !this._historyLoaded) this.loadHistory();
+        if (targetId === 'collection-page' && !this._collectionLoaded) this.loadCollections();
     }
 
     handleScale(value) {
@@ -765,6 +761,24 @@ class XHSWebUI {
             }
         }
         
+        // 原帖链接按钮
+        const originalLinkBtn = document.getElementById('noteOriginalLink');
+        if (originalLinkBtn) {
+            const noteId = note.id;
+            const deepLink = `xhsdiscover://item/${noteId}`;
+            const webUrl = `https://www.xiaohongshu.com/explore/${noteId}`;
+            originalLinkBtn.onclick = (e) => {
+                e.stopPropagation();
+                const start = Date.now();
+                window.location.href = deepLink;
+                setTimeout(() => {
+                    if (Date.now() - start < 1800) {
+                        window.open(webUrl, '_blank');
+                    }
+                }, 1500);
+            };
+        }
+
         // 渲染分享图标
         if (this.noteShareBtn && window.svgIconShare) {
             this.noteShareBtn.innerHTML = window.svgIconShare;
@@ -1100,7 +1114,7 @@ class XHSWebUI {
     closeNoteDetailSwipe() {
         const viewer = this.noteDetailViewer;
         const source = this._noteDetailSourceEl;
-        const dur = 380;
+        const dur = 350;
 
         const mediaContainer = viewer.querySelector('.note-media-container');
         const coverImg = source && source.querySelector('.item-cover img');
@@ -1122,11 +1136,17 @@ class XHSWebUI {
                 left: imgRect.left + 'px', top: imgRect.top + 'px',
                 width: imgRect.width + 'px', height: imgRect.height + 'px',
                 objectFit: 'cover', background: '#1B1B1B',
-                borderRadius: '0', pointerEvents: 'none',
-                opacity: '0',
+                borderRadius: viewer.style.borderRadius || '0',
+                pointerEvents: 'none',
                 willChange: 'left, top, width, height',
             });
             document.body.appendChild(clone);
+
+            viewer.style.transition = 'none';
+            viewer.style.transform = '';
+            viewer.style.borderRadius = '';
+            viewer.style.backgroundColor = 'transparent';
+            mediaContainer.style.opacity = '0';
 
             const header = viewer.querySelector('.note-detail-header');
             const footer = viewer.querySelector('.note-detail-footer');
@@ -1134,40 +1154,37 @@ class XHSWebUI {
             const dots = viewer.querySelector('.note-media-dots');
             const counter = viewer.querySelector('.note-media-counter');
 
+            if (header) {
+                header.style.transformOrigin = 'top center';
+                header.style.transition = `transform ${dur * 0.5}ms ease, opacity ${dur * 0.4}ms ease`;
+                header.style.transform = 'scaleY(0)';
+                header.style.opacity = '0';
+            }
+            if (footer) {
+                footer.style.transformOrigin = 'bottom center';
+                footer.style.transition = `transform ${dur * 0.5}ms ease, opacity ${dur * 0.4}ms ease`;
+                footer.style.transform = 'scaleY(0)';
+                footer.style.opacity = '0';
+            }
+            if (textContent) {
+                textContent.style.transformOrigin = 'bottom center';
+                textContent.style.transition = `transform ${dur * 0.5}ms ease, opacity ${dur * 0.4}ms ease`;
+                textContent.style.transform = 'scaleY(0)';
+                textContent.style.opacity = '0';
+            }
+            [dots, counter].filter(Boolean).forEach(el => {
+                el.style.transition = `opacity ${dur * 0.3}ms ease`;
+                el.style.opacity = '0';
+            });
+
             clone.offsetHeight;
-            clone.style.transition = 'opacity 100ms ease';
-            clone.style.opacity = '1';
-            mediaContainer.style.transition = 'opacity 100ms ease';
-            mediaContainer.style.opacity = '0';
+            clone.style.transition = `left ${dur}ms cubic-bezier(0.4, 0, 0.2, 1), top ${dur}ms cubic-bezier(0.4, 0, 0.2, 1), width ${dur}ms cubic-bezier(0.4, 0, 0.2, 1), height ${dur}ms cubic-bezier(0.4, 0, 0.2, 1), border-radius ${dur}ms ease, background ${dur * 0.6}ms ease`;
 
-            setTimeout(() => {
-                clone.style.transition = `left ${dur}ms cubic-bezier(0.4, 0, 0.2, 1), top ${dur}ms cubic-bezier(0.4, 0, 0.2, 1), width ${dur}ms cubic-bezier(0.4, 0, 0.2, 1), height ${dur}ms cubic-bezier(0.4, 0, 0.2, 1), border-radius ${dur}ms ease, background ${dur * 0.6}ms ease`;
-
-                Object.assign(clone.style, {
-                    left: targetRect.left + 'px', top: targetRect.top + 'px',
-                    width: targetRect.width + 'px', height: targetRect.height + 'px',
-                    borderRadius: '8px', background: 'transparent',
-                });
-
-                if (header) {
-                    header.style.transition = `opacity ${dur * 0.3}ms ease, transform ${dur * 0.3}ms ease`;
-                    header.style.opacity = '0';
-                    header.style.transform = 'translateY(-100%)';
-                }
-                if (footer) {
-                    footer.style.transition = `opacity ${dur * 0.3}ms ease, transform ${dur * 0.3}ms ease`;
-                    footer.style.opacity = '0';
-                    footer.style.transform = 'translateY(100%)';
-                }
-                [textContent, dots, counter].filter(Boolean).forEach(el => {
-                    el.style.transition = `opacity ${dur * 0.3}ms ease, transform ${dur * 0.3}ms ease`;
-                    el.style.opacity = '0';
-                    el.style.transform = 'translateY(30px)';
-                });
-
-                viewer.style.transition = `background-color ${dur * 0.5}ms ease`;
-                viewer.style.backgroundColor = 'transparent';
-            }, 110);
+            Object.assign(clone.style, {
+                left: targetRect.left + 'px', top: targetRect.top + 'px',
+                width: targetRect.width + 'px', height: targetRect.height + 'px',
+                borderRadius: '8px', background: 'transparent',
+            });
 
             const allEls = [header, footer, textContent, dots, counter, mediaContainer].filter(Boolean);
             setTimeout(() => {
@@ -1176,10 +1193,10 @@ class XHSWebUI {
                 this._resetDetailStyles();
                 allEls.forEach(el => {
                     el.style.transition = ''; el.style.opacity = '';
-                    el.style.transform = '';
+                    el.style.transform = ''; el.style.transformOrigin = '';
                 });
                 this.noteMediaWrapper.style.visibility = '';
-            }, 110 + dur + 20);
+            }, dur + 20);
         } else {
             this._closeDetailFallback(viewer, dur);
         }
@@ -1206,21 +1223,6 @@ class XHSWebUI {
     }
 
     _fixIOSInputZoom() {
-        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-        if (!isIOS) return;
-        const vp = document.querySelector('meta[name="viewport"]');
-        if (!vp) return;
-        const base = 'width=device-width, initial-scale=1.0, viewport-fit=cover';
-        document.addEventListener('focusin', (e) => {
-            if (e.target.matches('input, select, textarea')) {
-                vp.setAttribute('content', base + ', maximum-scale=1.0');
-            }
-        });
-        document.addEventListener('focusout', (e) => {
-            if (e.target.matches('input, select, textarea')) {
-                setTimeout(() => vp.setAttribute('content', base), 100);
-            }
-        });
     }
 
     _initScrollRail() {
@@ -1559,17 +1561,130 @@ class XHSWebUI {
         const rawText = this.urlInput.value.trim();
 
         if (!rawText) {
-            this.showError('请输入小红书作品链接');
+            this.showError('请输入小红书作品链接或作者名');
             return;
         }
 
-        const urlsToFetch = links.length > 0 ? links : [rawText];
-
-        if (urlsToFetch.length === 1) {
-            await this._fetchSingleNote(urlsToFetch[0], refresh);
-        } else {
-            await this._fetchBatchNotes(urlsToFetch);
+        // 检测主页链接
+        const profileMatch = rawText.match(/xiaohongshu\.com\/user\/profile\/([a-f0-9]{24})/i);
+        if (profileMatch) {
+            await this._fetchAuthorNotes(profileMatch[1]);
+            return;
         }
+
+        if (links.length > 0) {
+            const urlsToFetch = links;
+            if (urlsToFetch.length === 1) {
+                await this._fetchSingleNote(urlsToFetch[0], refresh);
+            } else {
+                await this._fetchBatchNotes(urlsToFetch);
+            }
+        } else if (/https?:\/\/|xiaohongshu\.com|xhslink\.com/i.test(rawText)) {
+            await this._fetchSingleNote(rawText, refresh);
+        } else {
+            await this._fetchByAuthorName(rawText);
+        }
+    }
+
+    async _fetchByAuthorName(name) {
+        this.showLoading();
+        try {
+            const searchResp = await fetch(`/web/api/author/search?name=${encodeURIComponent(name)}&token=${encodeURIComponent(this.token)}`);
+            const rawResult = await searchResp.json();
+            const authors = Array.isArray(rawResult) ? rawResult : [];
+
+            if (authors.length === 0) {
+                this.showError(`未找到作者「${name}」，请先提取一个该作者的作品`);
+                return;
+            }
+
+            let selectedAuthor;
+            if (authors.length === 1) {
+                selectedAuthor = authors[0];
+            } else {
+                this.hideAll();
+                selectedAuthor = await this._showAuthorPicker(authors);
+                if (!selectedAuthor) return;
+                this.showLoading();
+            }
+
+            await this._fetchAuthorNotes(selectedAuthor.author_id);
+        } catch (err) {
+            this.showError(err.message || '作者搜索失败');
+        }
+    }
+
+    async _fetchAuthorNotes(authorId) {
+        this.showLoading();
+        try {
+            const settings = JSON.parse(localStorage.getItem('xhs_settings') || '{}');
+            const cookie = settings.cookie || '';
+            const proxy = settings.proxy || '';
+            const notesResp = await fetch(`/web/api/author/notes?author_id=${encodeURIComponent(authorId)}&cookie=${encodeURIComponent(cookie)}&proxy=${encodeURIComponent(proxy)}&token=${encodeURIComponent(this.token)}`);
+
+            if (!notesResp.ok) {
+                const err = await notesResp.json();
+                this.showError(err.error || '获取作者作品列表失败');
+                return;
+            }
+
+            const notesData = await notesResp.json();
+            this.hideAll();
+
+            if (notesData.urls.length === 0) {
+                const msg = notesData.total > 0
+                    ? `「${notesData.author_name}」主页共 ${notesData.total} 个作品，全部已在本地`
+                    : `「${notesData.author_name}」主页未找到作品`;
+                if (window.showToast) window.showToast(msg);
+                return;
+            }
+
+            if (window.showToast) {
+                window.showToast(`找到 ${notesData.author_name} 的 ${notesData.total} 个作品，${notesData.new_count} 个为新作品，开始抓取...`);
+            }
+            await this._fetchBatchNotes(notesData.urls);
+        } catch (err) {
+            this.showError(err.message || '获取作者作品失败');
+        }
+    }
+
+    _showAuthorPicker(authors) {
+        return new Promise((resolve) => {
+            const container = this.detectedLinksEl;
+            container.style.display = 'block';
+            container.innerHTML = '';
+
+            const title = document.createElement('div');
+            title.className = 'detected-links-header';
+            title.textContent = `找到 ${authors.length} 位匹配的作者，请选择：`;
+            title.style.cssText = 'padding: 1.5vh 2vw; font-weight: 600; font-size: 1.5vh;';
+            container.appendChild(title);
+
+            authors.forEach(author => {
+                const item = document.createElement('div');
+                item.className = 'detected-link-item';
+                item.style.cursor = 'pointer';
+                item.innerHTML = `
+                    <span style="flex:1">👤 ${author.author_name}</span>
+                    <span style="color:var(--text-muted); font-size:1.3vh">${author.count} 个作品</span>
+                `;
+                item.onclick = () => {
+                    container.style.display = 'none';
+                    resolve(author);
+                };
+                container.appendChild(item);
+            });
+
+            const cancelBtn = document.createElement('div');
+            cancelBtn.className = 'detected-link-item';
+            cancelBtn.style.cssText = 'cursor:pointer; justify-content:center; color:var(--text-muted);';
+            cancelBtn.textContent = '取消';
+            cancelBtn.onclick = () => {
+                container.style.display = 'none';
+                resolve(null);
+            };
+            container.appendChild(cancelBtn);
+        });
     }
 
     async _fetchSingleNote(url, refresh = false) {
@@ -1579,6 +1694,7 @@ class XHSWebUI {
             this.currentNote = data;
             this.displayResult(data);
             this.refreshBtn.style.display = 'flex';
+            this._historyLoaded = false;
         } catch (err) {
             this.showError(err.message || '获取失败，请检查链接或 Cookie');
         }
@@ -1624,6 +1740,7 @@ class XHSWebUI {
         this.urlInput.value = '';
         this.renderDetectedLinks([]);
 
+        this._historyLoaded = false;
         const msg = failed > 0
             ? `批量获取完成：成功 ${success} 个，失败 ${failed} 个`
             : `成功获取 ${success} 个作品`;
@@ -1849,6 +1966,7 @@ class XHSWebUI {
                 body: JSON.stringify({ note_id: this.currentNote.id, is_starred: newState })
             });
             this.updateStarBtn(newState === 1);
+            this._collectionLoaded = false;
         } catch (e) {
             console.error('收藏失败', e);
         }
@@ -1875,7 +1993,8 @@ class XHSWebUI {
         try {
             const resp = await fetch(`/web/api/history?search=${encodeURIComponent(search)}&sort=${sort}&token=${encodeURIComponent(this.token)}`);
             const data = await resp.json();
-            this.renderDataList(this.historyList, data);
+            this.renderDataList(this.historyList, data, sort);
+            this._historyLoaded = true;
         } catch (e) {
             console.error('加载历史失败', e);
         }
@@ -1887,12 +2006,13 @@ class XHSWebUI {
             const resp = await fetch(`/web/api/collection?search=${encodeURIComponent(search)}&token=${encodeURIComponent(this.token)}`);
             const data = await resp.json();
             this.renderDataList(this.collectionList, data);
+            this._collectionLoaded = true;
         } catch (e) {
             console.error('加载收藏失败', e);
         }
     }
 
-    renderDataList(container, items) {
+    renderDataList(container, items, sort = '') {
         container.innerHTML = '';
         this.swipeInstances = []; // 重新渲染时清空滑动实例记录
         if (!items.length) {
@@ -1908,7 +2028,14 @@ class XHSWebUI {
             groups[author].push(item);
         });
 
-        const sortedAuthors = Object.keys(groups).sort();
+        const sortedAuthors = Object.keys(groups);
+        if (sort === 'count_desc') {
+            sortedAuthors.sort((a, b) => groups[b].length - groups[a].length);
+        } else if (sort === 'count_asc') {
+            sortedAuthors.sort((a, b) => groups[a].length - groups[b].length);
+        } else {
+            sortedAuthors.sort();
+        }
 
         sortedAuthors.forEach(author => {
             try {
@@ -1921,9 +2048,11 @@ class XHSWebUI {
                 // 作者信息头部
                 const header = document.createElement('div');
                 header.className = 'author-info-header';
+                const authorId = authorItems[0]?.data?.authorId || '';
                 header.innerHTML = `
                     <div class="author-name-tag">
-                        👤 ${author}
+                        <img class="author-avatar" src="" data-author-id="${authorId}" referrerpolicy="no-referrer">
+                        <span class="author-name-text">${author}</span>
                         <button class="panorama-btn" title="查看该作者全景图集">🖼️ 全景视图</button>
                         <button class="waterfall-btn" title="查看该作者瀑布流图集">🧱 瀑布视图</button>
                         <button class="mode-toggle-btn" title="切换作品展示模式" data-mode="scroll">📐 横排</button>
@@ -1931,6 +2060,34 @@ class XHSWebUI {
                     <div class="author-work-count">${authorItems.length} 个作品</div>
                 `;
                 row.appendChild(header);
+
+                // 加载作者头像
+                const avatarImg = header.querySelector('.author-avatar');
+                if (authorId) {
+                    if (this._authorAvatarCache && this._authorAvatarCache[authorId]) {
+                        avatarImg.src = this.getMediaUrl(this._authorAvatarCache[authorId]);
+                    } else {
+                        fetch(`/web/api/author/avatar?author_id=${encodeURIComponent(authorId)}&token=${encodeURIComponent(this.token)}`)
+                            .then(r => r.json())
+                            .then(data => {
+                                if (data && data.cover) {
+                                    if (!this._authorAvatarCache) this._authorAvatarCache = {};
+                                    this._authorAvatarCache[authorId] = data.cover;
+                                    avatarImg.src = this.getMediaUrl(data.cover);
+                                }
+                            })
+                            .catch(() => {});
+                    }
+                }
+
+                // 点击头像/作者名 → 打开作者主页
+                const openProfile = () => {
+                    if (window.AuthorProfile && authorId) {
+                        window.AuthorProfile.open(authorId, author, this);
+                    }
+                };
+                avatarImg.onclick = (e) => { e.stopPropagation(); openProfile(); };
+                header.querySelector('.author-name-text').onclick = (e) => { e.stopPropagation(); openProfile(); };
 
                 // 按钮逻辑
                 header.querySelector('.panorama-btn').onclick = (e) => {

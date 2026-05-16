@@ -255,6 +255,18 @@ class WebRecorder(IDRecorder):
             await self.database.commit()
         except:
             pass
+        # 作者私信表
+        await self.database.execute(
+            """CREATE TABLE IF NOT EXISTS author_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            author_id TEXT NOT NULL,
+            user_id INTEGER,
+            content TEXT NOT NULL,
+            is_self INTEGER DEFAULT 1,
+            created_at TEXT
+            );"""
+        )
+        await self.database.commit()
 
     async def add_history(self, note_id: str, data: dict, author_id: str, author_name: str, source_url: str = None, user_id: int = 1):
         cache_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -377,6 +389,33 @@ class WebRecorder(IDRecorder):
                 pass
         return ""
 
+    async def search_authors(self, name: str, user_id: int = None, include_legacy: bool = False):
+        query = "SELECT DISTINCT author_id, author_name, COUNT(*) as cnt FROM web_history WHERE author_name LIKE ?"
+        params = [f"%{name}%"]
+        if user_id is not None:
+            if include_legacy:
+                query += " AND (user_id = ? OR user_id IS NULL)"
+            else:
+                query += " AND user_id = ?"
+            params.append(user_id)
+        query += " GROUP BY author_id, author_name ORDER BY cnt DESC"
+        await self.cursor.execute(query, tuple(params))
+        rows = await self.cursor.fetchall()
+        return [{"author_id": r[0], "author_name": r[1], "count": r[2]} for r in rows if r[0]]
+
+    async def get_existing_note_ids(self, user_id: int = None, include_legacy: bool = False):
+        query = "SELECT note_id FROM web_history"
+        params = []
+        if user_id is not None:
+            if include_legacy:
+                query += " WHERE (user_id = ? OR user_id IS NULL)"
+            else:
+                query += " WHERE user_id = ?"
+            params.append(user_id)
+        await self.cursor.execute(query, tuple(params))
+        rows = await self.cursor.fetchall()
+        return {r[0] for r in rows}
+
     async def get_collections(self, search: str = None, tag: str = None, user_id: int = None, include_legacy: bool = False):
         query = "SELECT note_data, cache_time, is_starred, tags FROM web_history WHERE is_starred = 1"
         params = []
@@ -488,3 +527,47 @@ class WebRecorder(IDRecorder):
                 "token": row[4],
             }
         return None
+
+    # ---- 作者详情 ----
+    async def get_author_detail(self, author_id: str, user_id: int = None, include_legacy: bool = False):
+        query = "SELECT note_data, cache_time, is_starred, tags FROM web_history WHERE author_id = ?"
+        params = [author_id]
+        if user_id is not None:
+            if include_legacy:
+                query += " AND (user_id = ? OR user_id IS NULL)"
+            else:
+                query += " AND user_id = ?"
+            params.append(user_id)
+        query += " ORDER BY cache_time DESC"
+        await self.cursor.execute(query, tuple(params))
+        rows = await self.cursor.fetchall()
+        return [
+            {
+                "data": json.loads(row[0]),
+                "cache_time": row[1],
+                "is_starred": bool(row[2]),
+                "tags": row[3].split(",") if row[3] else [],
+            }
+            for row in rows
+        ]
+
+    # ---- 作者私信 ----
+    async def add_message(self, author_id: str, user_id: int, content: str, is_self: int = 1):
+        created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        await self.database.execute(
+            "INSERT INTO author_messages (author_id, user_id, content, is_self, created_at) VALUES (?, ?, ?, ?, ?);",
+            (author_id, user_id, content, is_self, created_at),
+        )
+        await self.database.commit()
+
+    async def get_messages(self, author_id: str, user_id: int = None, limit: int = 100):
+        query = "SELECT id, content, is_self, created_at FROM author_messages WHERE author_id = ?"
+        params = [author_id]
+        if user_id is not None:
+            query += " AND user_id = ?"
+            params.append(user_id)
+        query += " ORDER BY created_at ASC LIMIT ?"
+        params.append(limit)
+        await self.cursor.execute(query, tuple(params))
+        rows = await self.cursor.fetchall()
+        return [{"id": r[0], "content": r[1], "is_self": bool(r[2]), "time": r[3]} for r in rows]

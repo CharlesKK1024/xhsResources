@@ -14,6 +14,7 @@ warnings.filterwarnings('ignore', message='Unverified HTTPS request')
 
 from ..application import XHS
 from ..module import Settings, logging, ERROR, HEADERS, WebRecorder, FILE_SIGNATURES
+from ..expansion import Converter
 
 from datetime import datetime
 import hashlib
@@ -608,6 +609,232 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
             logging(lambda: print, f"获取作者头像失败: {e}", ERROR)
             return JSONResponse({"error": str(e)}, status_code=500)
 
+    @app.get("/web/api/author/search")
+    async def search_authors(
+        name: str = Query("", description="作者名关键字"),
+        token: str = Query("", description="用户令牌"),
+    ):
+        if not name.strip():
+            return []
+        user_id = None
+        include_legacy = False
+        if token:
+            user = await recorder.get_user_by_token(token)
+            if user:
+                user_id = user["id"]
+                if user.get("nickname") == "龙哥":
+                    include_legacy = True
+        results = await recorder.search_authors(name.strip(), user_id, include_legacy)
+        return results
+
+    @app.get("/web/api/author/notes")
+    async def get_author_notes(
+        author_id: str = Query(..., description="作者ID"),
+        cookie: str = Query("", description="小红书Cookie"),
+        proxy: str = Query("", description="代理"),
+        token: str = Query("", description="用户令牌"),
+    ):
+        try:
+            user_id = None
+            include_legacy = False
+            if token:
+                user = await recorder.get_user_by_token(token)
+                if user:
+                    user_id = user["id"]
+                    if user.get("nickname") == "龙哥":
+                        include_legacy = True
+
+            profile_url = f"https://www.xiaohongshu.com/user/profile/{author_id}"
+
+            # 直接用 httpx 客户端请求，不走 retry 装饰器（避免重试加重封禁）
+            headers = xhs.html.headers.copy()
+            if cookie:
+                headers["Cookie"] = cookie
+            try:
+                from httpx import HTTPError
+                response = await xhs.manager.request_client.get(
+                    profile_url, headers=headers,
+                )
+                status = response.status_code
+                if status == 429 or status == 403:
+                    return JSONResponse(
+                        {"error": f"小红书访问受限 (HTTP {status})，请稍后再试或更换 Cookie"},
+                        status_code=400,
+                    )
+                if status == 461:
+                    return JSONResponse(
+                        {"error": "触发小红书安全验证，请在浏览器中打开小红书完成验证后重试"},
+                        status_code=400,
+                    )
+                if status >= 400:
+                    return JSONResponse(
+                        {"error": f"主页请求失败 (HTTP {status})"},
+                        status_code=400,
+                    )
+                html = response.text
+            except HTTPError as e:
+                return JSONResponse(
+                    {"error": f"网络请求异常: {e}"},
+                    status_code=400,
+                )
+
+            if not html or len(html) < 500:
+                return JSONResponse(
+                    {"error": "主页返回内容为空，请检查 Cookie 是否有效"},
+                    status_code=400,
+                )
+
+            converter = Converter()
+            raw_text = converter._extract_object(html)
+            if not raw_text:
+                return JSONResponse(
+                    {"error": "主页数据解析失败，页面可能需要登录"},
+                    status_code=400,
+                )
+            state = converter._convert_object(raw_text)
+            if not state:
+                return JSONResponse(
+                    {"error": "主页 JSON 解析失败"},
+                    status_code=400,
+                )
+
+            note_ids = set()
+            def extract_note_ids(obj):
+                if isinstance(obj, dict):
+                    for k, v in obj.items():
+                        if k == "noteId" and isinstance(v, str) and len(v) > 10:
+                            note_ids.add(v)
+                        else:
+                            extract_note_ids(v)
+                elif isinstance(obj, list):
+                    for item in obj:
+                        extract_note_ids(item)
+
+            extract_note_ids(state)
+
+            if not note_ids:
+                return JSONResponse(
+                    {"error": "未在主页中找到作品，可能需要登录 Cookie"},
+                    status_code=400,
+                )
+
+            existing = await recorder.get_existing_note_ids(user_id, include_legacy)
+            new_ids = [nid for nid in note_ids if nid not in existing]
+            urls = [
+                f"https://www.xiaohongshu.com/explore/{nid}"
+                for nid in new_ids
+            ]
+
+            author_name = ""
+            def find_author_name(obj):
+                nonlocal author_name
+                if author_name:
+                    return
+                if isinstance(obj, dict):
+                    if "nickname" in obj and isinstance(obj["nickname"], str):
+                        author_name = obj["nickname"]
+                        return
+                    if "nickName" in obj and isinstance(obj["nickName"], str):
+                        author_name = obj["nickName"]
+                        return
+                    for v in obj.values():
+                        find_author_name(v)
+                elif isinstance(obj, list):
+                    for item in obj:
+                        find_author_name(item)
+
+            find_author_name(state)
+
+            return {
+                "author_name": author_name,
+                "author_id": author_id,
+                "total": len(note_ids),
+                "new_count": len(new_ids),
+                "existing_count": len(note_ids) - len(new_ids),
+                "urls": urls,
+            }
+        except Exception as e:
+            logging(lambda: print, f"获取作者作品列表失败: {e}", ERROR)
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    @app.get("/web/api/author/detail")
+    async def get_author_detail(
+        author_id: str = Query(..., description="作者ID"),
+        token: str = Query("", description="用户令牌"),
+    ):
+        try:
+            if not author_id:
+                return JSONResponse({"error": "缺少作者ID"}, status_code=400)
+            user_id = None
+            include_legacy = False
+            if token:
+                user = await recorder.get_user_by_token(token)
+                if user:
+                    user_id = user["id"]
+                    if user.get("nickname") == "龙哥":
+                        include_legacy = True
+
+            works = await recorder.get_author_detail(author_id, user_id, include_legacy)
+            if not works:
+                return JSONResponse({"error": "未找到该作者的作品"}, status_code=404)
+
+            author_name = works[0]["data"].get("author", "") if works else ""
+            avatar = await recorder.get_author_first_cover(author_id, user_id)
+
+            all_tags = set()
+            for w in works:
+                tags_str = w["data"].get("tags", "")
+                if tags_str:
+                    for t in tags_str.replace("[话题]", "").replace("#", " ").split():
+                        t = t.strip()
+                        if t:
+                            all_tags.add(t)
+
+            return {
+                "author_name": author_name,
+                "author_id": author_id,
+                "avatar": avatar,
+                "tags": sorted(all_tags),
+                "works": works,
+            }
+        except Exception as e:
+            logging(lambda: print, f"获取作者详情失败: {e}", ERROR)
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    @app.get("/web/api/author/messages")
+    async def get_author_messages(
+        author_id: str = Query(..., description="作者ID"),
+        token: str = Query("", description="用户令牌"),
+    ):
+        try:
+            user_id = None
+            if token:
+                user = await recorder.get_user_by_token(token)
+                if user:
+                    user_id = user["id"]
+            messages = await recorder.get_messages(author_id, user_id)
+            return messages
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    @app.post("/web/api/author/message")
+    async def send_author_message(payload: dict = Body(...)):
+        try:
+            author_id = payload.get("author_id")
+            content = payload.get("content", "").strip()
+            token = payload.get("token", "")
+            if not author_id or not content:
+                return JSONResponse({"error": "缺少参数"}, status_code=400)
+            user_id = 1
+            if token:
+                user = await recorder.get_user_by_token(token)
+                if user:
+                    user_id = user["id"]
+            await recorder.add_message(author_id, user_id, content)
+            return {"status": "success"}
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
+
     @app.get("/web/api/user/profile")
     async def get_user_profile(token: str = Query("", description="用户令牌")):
         try:
@@ -669,7 +896,7 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
 
 async def run_web_server(
     host: str = "0.0.0.0",
-    port: int = 5008,
+    port: int = 5006,
     log_level: str = "info",
 ):
     from uvicorn import Config, Server

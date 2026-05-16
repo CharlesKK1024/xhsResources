@@ -8,7 +8,7 @@ from source.web import run_web_server
 
 async def web_server(
     host="0.0.0.0",
-    port=5008,
+    port=5006,
     log_level="info",
 ):
     await run_web_server(

@@ -5,7 +5,7 @@
       "name": "xhs-web",
       "runtimeExecutable": "uv",
       "runtimeArgs": ["run", "main.py", "WEB"],
-      "port": 5008
+      "port": 5006
     }
   ]
 }
