@@ -181,6 +181,56 @@
 
 .ub-chat-btn:hover { opacity: 0.85; }
 
+/* 卡片操作区 */
+.ub-card-actions {
+    display: flex;
+    gap: 1.5vw;
+    flex-shrink: 0;
+}
+
+/* 关注按钮 */
+.ub-follow-btn {
+    padding: 0.8vh 2.5vw;
+    background: var(--primary-color);
+    color: #fff;
+    border: none;
+    border-radius: 0.8vh;
+    font-size: 1.2vh;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: opacity 0.15s, background 0.15s;
+}
+
+.ub-follow-btn:hover { opacity: 0.85; }
+.ub-follow-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.ub-follow-btn.ub-following {
+    background: var(--card-bg);
+    color: var(--text-muted);
+    border: 1px solid var(--border-color);
+}
+
+/* 搜索结果中的关注按钮（更小） */
+.ub-user-item .ub-follow-btn {
+    padding: 0.5vh 2vw;
+    font-size: 1.1vh;
+}
+
+/* 互关提示 */
+.ub-mutual-hint {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 20vh;
+    font-size: 1.6vh;
+    line-height: 2;
+}
+
+.ub-mutual-hint small {
+    color: var(--text-muted);
+    font-size: 1.2vh;
+}
+
 /* 导入全部按钮 */
 .ub-import-all-bar {
     padding: 1vh 0;

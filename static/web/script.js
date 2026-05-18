@@ -276,7 +276,29 @@ class XHSWebUI {
         this.viewerClose.onclick = () => this.closeViewer();
         this.viewerPrev.onclick = (e) => { e.stopPropagation(); this.prevImage(); };
         this.viewerNext.onclick = (e) => { e.stopPropagation(); this.nextImage(); };
-        this.fullViewer.onclick = () => this.closeViewer();
+
+        let vwScale = 1, vwTransX = 0, vwTransY = 0;
+        let vwPinching = false, vwPinchStartDist = 0, vwPinchStartScale = 1;
+        let vwPanning = false, vwPanStartX = 0, vwPanStartY = 0, vwPanBaseX = 0, vwPanBaseY = 0;
+        let vwTouchStartX = 0, vwTouchMoved = false, vwGestureActive = false;
+
+        const vwResetZoom = (animate) => {
+            vwScale = 1; vwTransX = 0; vwTransY = 0;
+            if (animate) {
+                this.viewerImg.style.transition = 'transform 0.3s ease';
+                this.viewerImg.style.transform = '';
+                setTimeout(() => { this.viewerImg.style.transition = ''; }, 320);
+            } else {
+                this.viewerImg.style.transition = '';
+                this.viewerImg.style.transform = '';
+            }
+        };
+        this._vwResetZoom = vwResetZoom;
+
+        this.fullViewer.onclick = (e) => {
+            if (this._viewerAnimating || vwGestureActive) return;
+            this.closeViewer();
+        };
         
         // 瀑布流事件
         this.waterfallClose.onclick = () => this.closeWaterfall();
@@ -362,6 +384,17 @@ class XHSWebUI {
         let noteGestureLock = '';
         let noteDragging = false;
         this.noteMediaWrapper.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 2) {
+                noteGestureLock = 'pinch';
+                this.openViewer(this.noteMediaList, this.noteMediaIndex, {
+                    type: 'noteDetail',
+                    getSourceImg: (idx) => {
+                        const items = this.noteMediaWrapper.querySelectorAll('.note-media-item');
+                        return items[idx] ? items[idx].querySelector('img') : null;
+                    },
+                });
+                return;
+            }
             noteTouchStartX = e.touches[0].clientX;
             noteTouchStartY = e.touches[0].clientY;
             noteTouchStartTime = Date.now();
@@ -370,6 +403,7 @@ class XHSWebUI {
             this.noteMediaWrapper.style.transition = 'none';
         }, { passive: true });
         this.noteMediaWrapper.addEventListener('touchmove', (e) => {
+            if (noteGestureLock === 'pinch') return;
             const touch = e.touches[0];
             const diffX = touch.clientX - noteTouchStartX;
             const diffY = touch.clientY - noteTouchStartY;
@@ -396,6 +430,10 @@ class XHSWebUI {
             }
         }, { passive: false });
         this.noteMediaWrapper.addEventListener('touchend', (e) => {
+            if (noteGestureLock === 'pinch') {
+                noteGestureLock = '';
+                return;
+            }
             if (noteGestureLock === 'horizontal' && noteDragging) {
                 e.stopPropagation();
                 const touchEndX = e.changedTouches[0].clientX;
@@ -427,24 +465,86 @@ class XHSWebUI {
 
         // 键盘支持
         window.addEventListener('keydown', (e) => {
-            if (this.fullViewer.style.display === 'flex') {
+            if (this.fullViewer.style.display === 'flex' && !this._viewerAnimating) {
                 if (e.key === 'ArrowLeft') this.prevImage();
                 if (e.key === 'ArrowRight') this.nextImage();
                 if (e.key === 'Escape') this.closeViewer();
             }
         });
 
-        // 触摸滑动支持
-        let touchStartX = 0;
+        // 全景查看器：双指缩放 + 单指平移 + 滑动切换
         this.fullViewer.addEventListener('touchstart', (e) => {
-            touchStartX = e.touches[0].clientX;
+            if (this._viewerAnimating) return;
+            if (e.touches.length === 2) {
+                vwPinching = true;
+                vwGestureActive = true;
+                vwPanning = false;
+                const t0 = e.touches[0], t1 = e.touches[1];
+                vwPinchStartDist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+                vwPinchStartScale = vwScale;
+            } else if (e.touches.length === 1) {
+                vwTouchStartX = e.touches[0].clientX;
+                vwTouchMoved = false;
+                if (vwScale > 1.05) {
+                    vwPanning = true;
+                    vwGestureActive = true;
+                    vwPanStartX = e.touches[0].clientX;
+                    vwPanStartY = e.touches[0].clientY;
+                    vwPanBaseX = vwTransX;
+                    vwPanBaseY = vwTransY;
+                }
+            }
         }, { passive: true });
+        this.fullViewer.addEventListener('touchmove', (e) => {
+            if (this._viewerAnimating) return;
+            if (vwPinching && e.touches.length >= 2) {
+                if (e.cancelable) e.preventDefault();
+                const t0 = e.touches[0], t1 = e.touches[1];
+                const dist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+                vwScale = Math.max(0.5, Math.min(vwPinchStartScale * (dist / vwPinchStartDist), 5));
+                this.viewerImg.style.transition = 'none';
+                this.viewerImg.style.transform = `scale(${vwScale}) translate(${vwTransX}px, ${vwTransY}px)`;
+                vwTouchMoved = true;
+                return;
+            }
+            if (vwPanning && e.touches.length === 1) {
+                if (e.cancelable) e.preventDefault();
+                const dx = (e.touches[0].clientX - vwPanStartX) / vwScale;
+                const dy = (e.touches[0].clientY - vwPanStartY) / vwScale;
+                vwTransX = vwPanBaseX + dx;
+                vwTransY = vwPanBaseY + dy;
+                this.viewerImg.style.transition = 'none';
+                this.viewerImg.style.transform = `scale(${vwScale}) translate(${vwTransX}px, ${vwTransY}px)`;
+                vwTouchMoved = true;
+                return;
+            }
+            if (e.touches.length === 1) {
+                if (Math.abs(e.touches[0].clientX - vwTouchStartX) > 10) vwTouchMoved = true;
+            }
+        }, { passive: false });
         this.fullViewer.addEventListener('touchend', (e) => {
-            const touchEndX = e.changedTouches[0].clientX;
-            const diff = touchEndX - touchStartX;
-            if (Math.abs(diff) > 50) {
-                if (diff > 0) this.prevImage();
-                else this.nextImage();
+            if (this._viewerAnimating) return;
+            if (vwPinching) {
+                vwPinching = false;
+                if (vwScale < 1) {
+                    vwResetZoom(true);
+                }
+                setTimeout(() => { vwGestureActive = false; }, 100);
+                return;
+            }
+            if (vwPanning) {
+                vwPanning = false;
+                setTimeout(() => { vwGestureActive = false; }, 100);
+                return;
+            }
+            if (vwScale <= 1.05 && vwTouchMoved && e.changedTouches.length) {
+                const diff = e.changedTouches[0].clientX - vwTouchStartX;
+                if (Math.abs(diff) > 50) {
+                    vwGestureActive = true;
+                    if (diff > 0) this.prevImage();
+                    else this.nextImage();
+                    setTimeout(() => { vwGestureActive = false; }, 100);
+                }
             }
         }, { passive: true });
 
@@ -663,19 +763,158 @@ class XHSWebUI {
     }
 
     // 查看器核心方法
-    openViewer(images, startIndex = 0) {
+    openViewer(images, startIndex = 0, sourceContext = null) {
         if (!images || images.length === 0) return;
         this.viewerList = images;
         this.viewerIndex = startIndex;
+        this._viewerSourceContext = sourceContext || null;
         this.fullViewer.style.zIndex = window.nextOverlayZ();
+
+        if (sourceContext) {
+            this._openViewerAnimated(startIndex);
+        } else {
+            this.fullViewer.style.backgroundColor = '#000';
+            this.fullViewer.style.display = 'flex';
+            document.body.style.overflow = 'hidden';
+            this.updateViewerImage();
+        }
+    }
+
+    _openViewerAnimated(index) {
+        const sourceImg = this._viewerSourceContext.getSourceImg(index);
+        if (!sourceImg) {
+            this.fullViewer.style.backgroundColor = '#000';
+            this.fullViewer.style.display = 'flex';
+            document.body.style.overflow = 'hidden';
+            this.updateViewerImage();
+            return;
+        }
+
+        this._viewerAnimating = true;
+        const sourceRect = sourceImg.getBoundingClientRect();
+        const dur = 350;
+
+        this.fullViewer.style.backgroundColor = 'transparent';
         this.fullViewer.style.display = 'flex';
         document.body.style.overflow = 'hidden';
-        this.updateViewerImage();
+
+        this.viewerImg.style.opacity = '0';
+        this.viewerImg.src = this.getMediaUrl(this.viewerList[index]);
+        this.viewerCounter.textContent = `${index + 1} / ${this.viewerList.length}`;
+        this.viewerPrev.style.visibility = index === 0 ? 'hidden' : 'visible';
+        this.viewerNext.style.visibility = index === this.viewerList.length - 1 ? 'hidden' : 'visible';
+
+        const clone = document.createElement('img');
+        clone.src = sourceImg.src;
+        clone.referrerPolicy = 'no-referrer';
+        clone.className = 'viewer-hero-clone';
+        Object.assign(clone.style, {
+            left: sourceRect.left + 'px', top: sourceRect.top + 'px',
+            width: sourceRect.width + 'px', height: sourceRect.height + 'px',
+            borderRadius: '0',
+            transition: `left ${dur}ms cubic-bezier(0.25,0.1,0.25,1), top ${dur}ms cubic-bezier(0.25,0.1,0.25,1), width ${dur}ms cubic-bezier(0.25,0.1,0.25,1), height ${dur}ms cubic-bezier(0.25,0.1,0.25,1)`,
+        });
+        document.body.appendChild(clone);
+        clone.offsetHeight;
+
+        this.fullViewer.style.transition = `background-color ${dur}ms ease`;
+        this.fullViewer.style.backgroundColor = '#000';
+
+        const vpW = window.innerWidth, vpH = window.innerHeight;
+        const natW = sourceImg.naturalWidth || sourceRect.width;
+        const natH = sourceImg.naturalHeight || sourceRect.height;
+        const scale = Math.min(vpW / natW, vpH / natH, 1);
+        const targetW = natW * scale;
+        const targetH = natH * scale;
+
+        Object.assign(clone.style, {
+            left: (vpW - targetW) / 2 + 'px',
+            top: (vpH - targetH) / 2 + 'px',
+            width: targetW + 'px',
+            height: targetH + 'px',
+        });
+
+        const cleanup = () => {
+            this.viewerImg.style.opacity = '1';
+            clone.remove();
+            this.fullViewer.style.transition = '';
+            this._viewerAnimating = false;
+        };
+
+        const animDone = new Promise(r => setTimeout(r, dur + 20));
+        const imgLoaded = this.viewerImg.complete
+            ? Promise.resolve()
+            : new Promise(r => { this.viewerImg.onload = r; this.viewerImg.onerror = r; });
+        Promise.all([animDone, imgLoaded]).then(cleanup);
     }
 
     closeViewer() {
-        this.fullViewer.style.display = 'none';
-        document.body.style.overflow = '';
+        if (this._viewerAnimating) return;
+        if (this._vwResetZoom) this._vwResetZoom(false);
+        if (this._viewerSourceContext) {
+            this._closeViewerAnimated();
+        } else {
+            this.fullViewer.style.display = 'none';
+            document.body.style.overflow = '';
+        }
+    }
+
+    _closeViewerAnimated() {
+        if (this._viewerSourceContext.type === 'noteDetail') {
+            this.noteMediaIndex = this.viewerIndex;
+            this.noteMediaWrapper.style.transition = 'none';
+            this.updateNoteMediaUI();
+            this.noteMediaWrapper.offsetHeight;
+        }
+
+        const sourceImg = this._viewerSourceContext.getSourceImg(this.viewerIndex);
+        if (!sourceImg) {
+            this.fullViewer.style.display = 'none';
+            document.body.style.overflow = '';
+            this._viewerSourceContext = null;
+            return;
+        }
+
+        this._viewerAnimating = true;
+        const dur = 320;
+        const targetRect = sourceImg.getBoundingClientRect();
+        const viewerRect = this.viewerImg.getBoundingClientRect();
+
+        const clone = document.createElement('img');
+        clone.src = this.viewerImg.src;
+        clone.referrerPolicy = 'no-referrer';
+        clone.className = 'viewer-hero-clone';
+        Object.assign(clone.style, {
+            left: viewerRect.left + 'px', top: viewerRect.top + 'px',
+            width: viewerRect.width + 'px', height: viewerRect.height + 'px',
+        });
+        document.body.appendChild(clone);
+
+        this.viewerImg.style.opacity = '0';
+        this.viewerCounter.style.opacity = '0';
+
+        clone.offsetHeight;
+        clone.style.transition = `left ${dur}ms cubic-bezier(0.4,0,0.2,1), top ${dur}ms cubic-bezier(0.4,0,0.2,1), width ${dur}ms cubic-bezier(0.4,0,0.2,1), height ${dur}ms cubic-bezier(0.4,0,0.2,1)`;
+
+        this.fullViewer.style.transition = `background-color ${dur}ms ease`;
+        this.fullViewer.style.backgroundColor = 'transparent';
+
+        Object.assign(clone.style, {
+            left: targetRect.left + 'px', top: targetRect.top + 'px',
+            width: targetRect.width + 'px', height: targetRect.height + 'px',
+        });
+
+        setTimeout(() => {
+            clone.remove();
+            this.fullViewer.style.display = 'none';
+            this.fullViewer.style.transition = '';
+            this.fullViewer.style.backgroundColor = '#000';
+            this.viewerImg.style.opacity = '';
+            this.viewerCounter.style.opacity = '';
+            document.body.style.overflow = '';
+            this._viewerSourceContext = null;
+            this._viewerAnimating = false;
+        }, dur + 20);
     }
 
     prevImage() {
@@ -693,6 +932,7 @@ class XHSWebUI {
     }
 
     updateViewerImage() {
+        if (this._vwResetZoom) this._vwResetZoom(false);
         const url = this.viewerList[this.viewerIndex];
         this.viewerImg.style.opacity = '0';
         this.viewerImg.src = this.getMediaUrl(url);
@@ -700,7 +940,7 @@ class XHSWebUI {
             this.viewerImg.style.opacity = '1';
         };
         this.viewerCounter.textContent = `${this.viewerIndex + 1} / ${this.viewerList.length}`;
-        
+
         this.viewerPrev.style.visibility = this.viewerIndex === 0 ? 'hidden' : 'visible';
         this.viewerNext.style.visibility = this.viewerIndex === this.viewerList.length - 1 ? 'hidden' : 'visible';
     }
@@ -742,6 +982,7 @@ class XHSWebUI {
     openNoteDetail(note, sourceEl) {
         if (!note) return;
         this._noteDetailSourceEl = sourceEl || null;
+        this._noteDetailJustOpened = true;
 
         const viewer = this.noteDetailViewer;
         viewer.style.zIndex = window.nextOverlayZ();
@@ -882,7 +1123,14 @@ class XHSWebUI {
             
             // 点击图片进入全屏浏览
             img.onclick = () => {
-                this.openViewer(this.noteMediaList, i);
+                if (this._noteDetailJustOpened) return;
+                this.openViewer(this.noteMediaList, i, {
+                    type: 'noteDetail',
+                    getSourceImg: (idx) => {
+                        const items = this.noteMediaWrapper.querySelectorAll('.note-media-item');
+                        return items[idx] ? items[idx].querySelector('img') : null;
+                    },
+                });
             };
             
             container.appendChild(img);
@@ -1150,15 +1398,18 @@ class XHSWebUI {
                     el.style.transform = '';
                 });
                 viewer.style.transition = '';
+                this._noteDetailJustOpened = false;
             }, dur);
         } else {
             viewer.offsetHeight;
             viewer.style.transition = 'transform 0.3s cubic-bezier(0.23, 1, 0.32, 1)';
             viewer.style.transform = 'translateY(0)';
+            setTimeout(() => { this._noteDetailJustOpened = false; }, 400);
         }
     }
 
     closeNoteDetail() {
+        this._viewerSourceContext = null;
         this.closeViewer();
         const source = this._noteDetailSourceEl;
         const coverImg = source && source.querySelector('.item-cover img, .ap-work-cover img');
@@ -3094,6 +3345,16 @@ class XHSWebUI {
         formData.append('token', this.token);
         formData.append('file', file);
 
+        const overlay = document.createElement('div');
+        Object.assign(overlay.style, {
+            position: 'fixed', inset: '0', zIndex: '999999',
+            background: 'rgba(0,0,0,0.5)', display: 'flex',
+            alignItems: 'center', justifyContent: 'center',
+            color: '#fff', fontSize: '2vh', gap: '1vh',
+        });
+        overlay.textContent = '头像上传中...';
+        document.body.appendChild(overlay);
+
         try {
             const resp = await fetch('/web/api/user/avatar', {
                 method: 'POST',
@@ -3106,6 +3367,8 @@ class XHSWebUI {
             this.showUserWidget(this.currentUser);
         } catch (e) {
             alert('头像上传失败: ' + e.message);
+        } finally {
+            overlay.remove();
         }
     }
 

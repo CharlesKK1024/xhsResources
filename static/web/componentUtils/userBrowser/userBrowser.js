@@ -105,6 +105,40 @@
         return (currentApp && currentApp.token) || localStorage.getItem('xhs_token') || '';
     }
 
+    async function checkFollowStatus(userId) {
+        try {
+            var resp = await fetch('/web/api/user/follow/check?target_id=' + userId + '&token=' + encodeURIComponent(getToken()));
+            return await resp.json();
+        } catch (e) {
+            return { is_following: false, is_mutual: false };
+        }
+    }
+
+    async function toggleFollow(userId, btn) {
+        var isFollowing = btn.dataset.following === 'true';
+        btn.disabled = true;
+        try {
+            if (isFollowing) {
+                await fetch('/web/api/user/follow?target_id=' + userId + '&token=' + encodeURIComponent(getToken()), { method: 'DELETE' });
+                btn.dataset.following = 'false';
+                btn.textContent = '关注';
+                btn.classList.remove('ub-following');
+            } else {
+                await fetch('/web/api/user/follow', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target_id: userId, token: getToken() }),
+                });
+                btn.dataset.following = 'true';
+                btn.textContent = '已关注';
+                btn.classList.add('ub-following');
+            }
+        } catch (e) {
+            if (window.showToast) window.showToast('操作失败');
+        }
+        btn.disabled = false;
+    }
+
     async function doSearch(query) {
         var results = container.querySelector('.ub-search-results');
         if (!query) {
@@ -133,8 +167,32 @@
                     '  <span class="ub-user-name">' + escapeHtml(user.nickname) + '</span>',
                     '  <span class="ub-user-count">' + user.work_count + ' 个作品</span>',
                     '</div>',
+                    '<button class="ub-follow-btn" data-following="false">关注</button>',
                     '<span class="ub-user-arrow">›</span>',
                 ].join('');
+
+                var followBtn = item.querySelector('.ub-follow-btn');
+                followBtn.onclick = function (e) {
+                    e.stopPropagation();
+                    toggleFollow(user.id, followBtn);
+                };
+                checkFollowStatus(user.id).then(function (status) {
+                    if (status.is_following) {
+                        followBtn.dataset.following = 'true';
+                        followBtn.textContent = '已关注';
+                        followBtn.classList.add('ub-following');
+                    }
+                });
+
+                var avatarWrap = item.querySelector('.ub-user-avatar-wrap');
+                avatarWrap.style.cursor = 'pointer';
+                avatarWrap.onclick = function (e) {
+                    e.stopPropagation();
+                    if (window.AuthorProfile && window.AuthorProfile.openUserProfile) {
+                        window.AuthorProfile.openUserProfile(user.id, null);
+                    }
+                };
+
                 item.onclick = function () {
                     openUserCollection(user);
                 };
@@ -160,8 +218,24 @@
             '  <div class="ub-target-name">' + escapeHtml(user.nickname) + '</div>',
             '  <div class="ub-target-count">共 ' + user.work_count + ' 个作品</div>',
             '</div>',
-            '<button class="ub-chat-btn">发私信</button>',
+            '<div class="ub-card-actions">',
+            '  <button class="ub-follow-btn" data-following="false">关注</button>',
+            '  <button class="ub-chat-btn">发私信</button>',
+            '</div>',
         ].join('');
+
+        var followBtn = card.querySelector('.ub-follow-btn');
+        checkFollowStatus(user.id).then(function (status) {
+            if (status.is_following) {
+                followBtn.dataset.following = 'true';
+                followBtn.textContent = '已关注';
+                followBtn.classList.add('ub-following');
+            }
+        });
+        followBtn.onclick = function (e) {
+            e.stopPropagation();
+            toggleFollow(user.id, followBtn);
+        };
 
         card.querySelector('.ub-chat-btn').onclick = function (e) {
             e.stopPropagation();
@@ -175,9 +249,15 @@
 
         var importAllBtn = container.querySelector('.ub-import-all-btn');
         importAllBtn.onclick = function () { importAll(); };
+        importAllBtn.style.display = '';
 
         try {
             var resp = await fetch('/web/api/user/' + user.id + '/history?token=' + encodeURIComponent(getToken()));
+            if (resp.status === 403) {
+                importAllBtn.style.display = 'none';
+                authorList.innerHTML = '<div class="ub-empty ub-mutual-hint">🔒 相互关注后可以查看对方的典藏作品集</div>';
+                return;
+            }
             if (!resp.ok) throw new Error('fetch failed');
             var items = await resp.json();
             if (!items.length) {
@@ -186,7 +266,8 @@
             }
             renderAuthorList(authorList, items);
         } catch (e) {
-            authorList.innerHTML = '<div class="ub-empty">加载失败</div>';
+            importAllBtn.style.display = 'none';
+            authorList.innerHTML = '<div class="ub-empty ub-mutual-hint">🔒 相互关注后可以查看对方的典藏作品集</div>';
         }
     }
 

@@ -605,6 +605,8 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
                 return JSONResponse({"error": "请提供昵称"}, status_code=400)
             if not password:
                 return JSONResponse({"error": "请提供密码"}, status_code=400)
+            if nickname == "系统通知":
+                return JSONResponse({"error": "该昵称为系统保留"}, status_code=400)
 
             # 检查昵称是否已存在
             existing_user = await recorder.get_user_by_nickname(nickname)
@@ -967,6 +969,8 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
                 return JSONResponse({"error": "用户不存在"}, status_code=404)
 
             if nickname and nickname != user["nickname"]:
+                if nickname == "系统通知":
+                    return JSONResponse({"error": "该昵称为系统保留"}, status_code=400)
                 existing = await recorder.get_user_by_nickname(nickname)
                 if existing and existing["id"] != user["id"]:
                     return JSONResponse({"error": "该昵称已被使用"}, status_code=409)
@@ -1026,6 +1030,14 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
         user_data = await recorder.get_user_by_token(token)
         if not user_data:
             return JSONResponse({"error": "无效令牌"}, status_code=401)
+        user_id = user_data["id"]
+        if user_id != target_id:
+            is_mutual = await recorder.is_mutual_following(user_id, target_id)
+            if not is_mutual:
+                return JSONResponse(
+                    {"error": "mutual_required", "message": "需要互相关注才能查看对方作品集"},
+                    status_code=403,
+                )
         return await recorder.get_history(user_id=target_id)
 
     @app.post("/web/api/import/notes")
@@ -1144,9 +1156,21 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
             return JSONResponse({"error": "需要登录"}, status_code=401)
         if not target_id:
             return JSONResponse({"error": "缺少参数"}, status_code=400)
-        if user_id == int(target_id):
+        target_id = int(target_id)
+        if user_id == target_id:
             return JSONResponse({"error": "不能关注自己"}, status_code=400)
-        await recorder.follow_user(user_id, int(target_id))
+        already_following = await recorder.is_following(user_id, target_id)
+        await recorder.follow_user(user_id, target_id)
+        if not already_following:
+            follower = await recorder.get_user_by_id(user_id)
+            if follower:
+                follow_card = json.dumps({
+                    "type": "follow_card",
+                    "user_id": user_id,
+                    "nickname": follower.get("nickname", ""),
+                    "avatar_url": follower.get("avatar_url", ""),
+                }, ensure_ascii=False)
+                await recorder.send_user_message(0, target_id, follow_card)
         return {"status": "success"}
 
     @app.delete("/web/api/user/follow")
@@ -1174,9 +1198,10 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
     ):
         user_id = await _get_user_id_from_token(token)
         if not user_id:
-            return {"is_following": False}
+            return {"is_following": False, "is_mutual": False}
         is_following = await recorder.is_following(user_id, target_id)
-        return {"is_following": is_following}
+        is_mutual = await recorder.is_mutual_following(user_id, target_id) if is_following else False
+        return {"is_following": is_following, "is_mutual": is_mutual}
 
     # ---- 站内用户主页 API ----
 
@@ -1191,9 +1216,12 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
             return JSONResponse({"error": "用户不存在"}, status_code=404)
         counts = await recorder.get_follow_counts(target_id)
         is_following = False
+        is_mutual = False
         if user_id:
             is_following = await recorder.is_following(user_id, target_id)
-        works = await recorder.get_history(user_id=target_id)
+            if is_following:
+                is_mutual = await recorder.is_mutual_following(user_id, target_id)
+        works = await recorder.get_history(user_id=target_id) if (is_mutual or user_id == target_id) else []
         return {
             "id": target_user["id"],
             "nickname": target_user["nickname"],
@@ -1201,9 +1229,204 @@ def create_web_app(xhs: XHS, recorder: WebRecorder) -> FastAPI:
             "following_count": counts["following_count"],
             "followers_count": counts["followers_count"],
             "is_following": is_following,
+            "is_mutual": is_mutual,
             "work_count": len(works),
             "works": works,
         }
+
+    # ---- 群组 API ----
+
+    @app.post("/web/api/group")
+    async def create_group(payload: dict = Body(...)):
+        token = payload.get("token", "")
+        name = payload.get("name", "").strip()
+        member_ids = payload.get("member_ids", [])
+        user_id = await _get_user_id_from_token(token)
+        if not user_id:
+            return JSONResponse({"error": "需要登录"}, status_code=401)
+        if not name:
+            return JSONResponse({"error": "群名不能为空"}, status_code=400)
+        group = await recorder.create_group(user_id, name)
+        added = []
+        for mid in member_ids:
+            mid = int(mid)
+            if await recorder.is_mutual_following(user_id, mid):
+                await recorder.add_group_member(group["id"], mid)
+                added.append(mid)
+        creator = await recorder.get_user_by_id(user_id)
+        creator_name = creator["nickname"] if creator else "未知"
+        await recorder.send_group_message(group["id"], 0, creator_name + " 创建了群聊")
+        return {"status": "success", "group": group}
+
+    @app.get("/web/api/user/groups")
+    async def get_user_groups(token: str = Query("")):
+        user_id = await _get_user_id_from_token(token)
+        if not user_id:
+            return JSONResponse({"error": "需要登录"}, status_code=401)
+        return await recorder.get_user_groups(user_id)
+
+    @app.get("/web/api/group/info")
+    async def get_group_info(
+        group_id: int = Query(...),
+        token: str = Query(""),
+    ):
+        user_id = await _get_user_id_from_token(token)
+        if not user_id:
+            return JSONResponse({"error": "需要登录"}, status_code=401)
+        if not await recorder.is_group_member(group_id, user_id):
+            return JSONResponse({"error": "非群成员"}, status_code=403)
+        info = await recorder.get_group_info(group_id)
+        if not info:
+            return JSONResponse({"error": "群组不存在"}, status_code=404)
+        return info
+
+    @app.get("/web/api/group/members")
+    async def get_group_members(
+        group_id: int = Query(...),
+        token: str = Query(""),
+    ):
+        user_id = await _get_user_id_from_token(token)
+        if not user_id:
+            return JSONResponse({"error": "需要登录"}, status_code=401)
+        if not await recorder.is_group_member(group_id, user_id):
+            return JSONResponse({"error": "非群成员"}, status_code=403)
+        return await recorder.get_group_members(group_id)
+
+    @app.post("/web/api/group/member")
+    async def add_group_member(payload: dict = Body(...)):
+        token = payload.get("token", "")
+        group_id = payload.get("group_id")
+        target_id = payload.get("user_id")
+        inviter_id = await _get_user_id_from_token(token)
+        if not inviter_id:
+            return JSONResponse({"error": "需要登录"}, status_code=401)
+        if not group_id or not target_id:
+            return JSONResponse({"error": "缺少参数"}, status_code=400)
+        group_id = int(group_id)
+        target_id = int(target_id)
+        if not await recorder.is_group_member(group_id, inviter_id):
+            return JSONResponse({"error": "你不是群成员"}, status_code=403)
+        if not await recorder.is_mutual_following(inviter_id, target_id):
+            return JSONResponse({"error": "只能邀请互关好友"}, status_code=403)
+        if await recorder.is_group_member(group_id, target_id):
+            return {"status": "success", "message": "已是群成员"}
+        await recorder.add_group_member(group_id, target_id)
+        inviter = await recorder.get_user_by_id(inviter_id)
+        target = await recorder.get_user_by_id(target_id)
+        inviter_name = inviter["nickname"] if inviter else "未知"
+        target_name = target["nickname"] if target else "未知"
+        await recorder.send_group_message(
+            group_id, 0, inviter_name + " 邀请了 " + target_name + " 加入群聊"
+        )
+        return {"status": "success"}
+
+    @app.delete("/web/api/group/member")
+    async def remove_group_member(
+        group_id: int = Query(...),
+        user_id: int = Query(...),
+        token: str = Query(""),
+    ):
+        operator_id = await _get_user_id_from_token(token)
+        if not operator_id:
+            return JSONResponse({"error": "需要登录"}, status_code=401)
+        if not await recorder.is_group_member(group_id, operator_id):
+            return JSONResponse({"error": "非群成员"}, status_code=403)
+        group_info = await recorder.get_group_info(group_id)
+        if not group_info:
+            return JSONResponse({"error": "群组不存在"}, status_code=404)
+        if user_id == operator_id:
+            if group_info["creator_id"] == operator_id:
+                return JSONResponse({"error": "群主不能退群"}, status_code=400)
+            await recorder.remove_group_member(group_id, user_id)
+            user = await recorder.get_user_by_id(user_id)
+            name = user["nickname"] if user else "未知"
+            await recorder.send_group_message(group_id, 0, name + " 退出了群聊")
+        else:
+            if group_info["creator_id"] != operator_id:
+                return JSONResponse({"error": "只有群主可以移除成员"}, status_code=403)
+            await recorder.remove_group_member(group_id, user_id)
+            target = await recorder.get_user_by_id(user_id)
+            target_name = target["nickname"] if target else "未知"
+            await recorder.send_group_message(group_id, 0, target_name + " 被移出群聊")
+        return {"status": "success"}
+
+    @app.put("/web/api/group/name")
+    async def update_group_name(payload: dict = Body(...)):
+        token = payload.get("token", "")
+        group_id = payload.get("group_id")
+        name = payload.get("name", "").strip()
+        user_id = await _get_user_id_from_token(token)
+        if not user_id:
+            return JSONResponse({"error": "需要登录"}, status_code=401)
+        if not group_id or not name:
+            return JSONResponse({"error": "缺少参数"}, status_code=400)
+        group_id = int(group_id)
+        group_info = await recorder.get_group_info(group_id)
+        if not group_info:
+            return JSONResponse({"error": "群组不存在"}, status_code=404)
+        if group_info["creator_id"] != user_id:
+            return JSONResponse({"error": "只有群主可以修改群名"}, status_code=403)
+        await recorder.update_group_name(group_id, name)
+        return {"status": "success"}
+
+    @app.post("/web/api/group/message")
+    async def send_group_message(payload: dict = Body(...)):
+        token = payload.get("token", "")
+        group_id = payload.get("group_id")
+        content = payload.get("content", "").strip()
+        user_id = await _get_user_id_from_token(token)
+        if not user_id:
+            return JSONResponse({"error": "需要登录"}, status_code=401)
+        if not group_id or not content:
+            return JSONResponse({"error": "缺少参数"}, status_code=400)
+        group_id = int(group_id)
+        if not await recorder.is_group_member(group_id, user_id):
+            return JSONResponse({"error": "非群成员"}, status_code=403)
+        msg_id = await recorder.send_group_message(group_id, user_id, content)
+        return {"status": "success", "id": msg_id}
+
+    @app.get("/web/api/group/messages")
+    async def get_group_messages(
+        group_id: int = Query(...),
+        token: str = Query(""),
+    ):
+        user_id = await _get_user_id_from_token(token)
+        if not user_id:
+            return JSONResponse({"error": "需要登录"}, status_code=401)
+        if not await recorder.is_group_member(group_id, user_id):
+            return JSONResponse({"error": "非群成员"}, status_code=403)
+        return await recorder.get_group_messages(group_id, user_id)
+
+    @app.get("/web/api/group/messages/poll")
+    async def poll_group_messages(
+        group_id: int = Query(...),
+        after_id: int = Query(0),
+        token: str = Query(""),
+    ):
+        user_id = await _get_user_id_from_token(token)
+        if not user_id:
+            return JSONResponse({"error": "需要登录"}, status_code=401)
+        if not await recorder.is_group_member(group_id, user_id):
+            return JSONResponse({"error": "非群成员"}, status_code=403)
+        return await recorder.get_new_group_messages(group_id, user_id, after_id)
+
+    @app.delete("/web/api/group/message/{message_id}")
+    async def delete_group_message(
+        message_id: int,
+        token: str = Query(""),
+    ):
+        user_id = await _get_user_id_from_token(token)
+        if not user_id:
+            return JSONResponse({"error": "需要登录"}, status_code=401)
+        await recorder.delete_group_message(message_id, user_id)
+        return {"status": "success"}
+
+    @app.get("/web/api/user/mutual-follows")
+    async def get_mutual_follows(token: str = Query("")):
+        user_id = await _get_user_id_from_token(token)
+        if not user_id:
+            return JSONResponse({"error": "需要登录"}, status_code=401)
+        return await recorder.get_mutual_follows(user_id)
 
     return app
 

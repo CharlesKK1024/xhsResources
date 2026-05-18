@@ -13,9 +13,12 @@
 
     var currentMode = 'author';
     var currentPeerId = null;
+    var currentGroupId = null;
     var pollTimer = null;
     var lastMessageId = 0;
     var lastRawTime = null;
+    var groupInfoPanel = null;
+    var invitePanel = null;
 
     var REACTIONS = [
         { emoji: '🐱', label: '棒' },
@@ -42,7 +45,9 @@
             '<div class="chat-header">' +
                 '<button class="chat-back">‹</button>' +
                 '<img class="chat-avatar-small" src="" referrerpolicy="no-referrer">' +
+                '<div class="chat-group-avatar-small" style="display:none"></div>' +
                 '<span class="chat-title"></span>' +
+                '<button class="chat-group-info-btn" style="display:none">⋯</button>' +
             '</div>' +
             '<div class="chat-messages"></div>' +
             '<div class="chat-reactions">' + reactionsHtml + '</div>' +
@@ -221,6 +226,9 @@
             if (parsed && parsed.type === 'note_card') {
                 return renderNoteCardBubble(parsed);
             }
+            if (parsed && parsed.type === 'follow_card') {
+                return renderFollowCardBubble(parsed);
+            }
         } catch (e) {}
         return '<div class="chat-msg-bubble">' + escapeHtml(content) + '</div>';
     }
@@ -233,6 +241,21 @@
                 '<div class="chat-note-card-title">' + escapeHtml(card.title || '无标题') + '</div>' +
                 '<div class="chat-note-card-author">' + escapeHtml(card.author || '') + '</div>' +
             '</div>' +
+        '</div>';
+    }
+
+    function renderFollowCardBubble(card) {
+        var avatarSrc = card.avatar_url ? getMediaUrl(card.avatar_url) : '';
+        var avatarHtml = avatarSrc
+            ? '<img class="chat-follow-card-avatar" src="' + avatarSrc + '" referrerpolicy="no-referrer">'
+            : '<span class="chat-follow-card-avatar-ph">👤</span>';
+        return '<div class="chat-follow-card" data-user-id="' + escapeAttr(String(card.user_id || '')) + '">' +
+            '<div class="chat-follow-card-left">' + avatarHtml + '</div>' +
+            '<div class="chat-follow-card-body">' +
+                '<div class="chat-follow-card-name">' + escapeHtml(card.nickname || '未知用户') + '</div>' +
+                '<div class="chat-follow-card-desc">关注了你</div>' +
+            '</div>' +
+            '<div class="chat-follow-card-action">查看主页 ›</div>' +
         '</div>';
     }
 
@@ -382,9 +405,14 @@
         hideContextMenu();
 
         try {
-            var url = currentMode === 'user'
-                ? '/web/api/user/message/' + messageId + '?token=' + encodeURIComponent(token)
-                : '/web/api/author/message/' + messageId + '?token=' + encodeURIComponent(token);
+            var url;
+            if (currentMode === 'group') {
+                url = '/web/api/group/message/' + messageId + '?token=' + encodeURIComponent(token);
+            } else if (currentMode === 'user') {
+                url = '/web/api/user/message/' + messageId + '?token=' + encodeURIComponent(token);
+            } else {
+                url = '/web/api/author/message/' + messageId + '?token=' + encodeURIComponent(token);
+            }
             var resp = await fetch(url, { method: 'DELETE' });
             if (resp.ok) {
                 var prev = msgEl.previousElementSibling;
@@ -406,6 +434,15 @@
 
     function bindNoteCardClick(container) {
         container.addEventListener('click', function (e) {
+            var followCard = e.target.closest('.chat-follow-card');
+            if (followCard) {
+                var userId = followCard.dataset.userId;
+                if (userId && window.AuthorProfile && window.AuthorProfile.openUserProfile) {
+                    window.AuthorProfile.openUserProfile(parseInt(userId, 10), null);
+                }
+                return;
+            }
+
             var card = e.target.closest('.chat-note-card');
             if (!card) return;
 
@@ -552,6 +589,7 @@
     async function sendNoteCard(note) {
         if (currentMode === 'user' && !currentPeerId) return;
         if (currentMode === 'author' && !currentAuthorId) return;
+        if (currentMode === 'group' && !currentGroupId) return;
 
         var cardData = {
             type: 'note_card',
@@ -575,7 +613,10 @@
 
         try {
             var url, body;
-            if (currentMode === 'user') {
+            if (currentMode === 'group') {
+                url = '/web/api/group/message';
+                body = { group_id: currentGroupId, content: content, token: token };
+            } else if (currentMode === 'user') {
                 url = '/web/api/user/message';
                 body = { receiver_id: currentPeerId, content: content, token: token };
             } else {
@@ -605,6 +646,7 @@
         currentMode = 'author';
         currentAuthorId = authorId;
         currentPeerId = null;
+        currentGroupId = null;
         currentAuthorName = authorName;
         currentAvatarUrl = avatarUrl || '';
         token = localStorage.getItem('xhs_token') || '';
@@ -615,6 +657,12 @@
 
         var avatarImg = el.querySelector('.chat-avatar-small');
         avatarImg.src = getMediaUrl(currentAvatarUrl);
+        avatarImg.style.display = '';
+        avatarImg.style.cursor = '';
+        avatarImg.onclick = null;
+
+        el.querySelector('.chat-group-avatar-small').style.display = 'none';
+        el.querySelector('.chat-group-info-btn').style.display = 'none';
 
         el.querySelector('.chat-messages').innerHTML = '';
         el.querySelector('.chat-input').value = '';
@@ -634,24 +682,97 @@
     async function openUserChat(peerId, peerName, peerAvatar) {
         currentMode = 'user';
         currentPeerId = peerId;
+        currentGroupId = null;
         currentAuthorId = null;
         currentAuthorName = peerName;
         currentAvatarUrl = peerAvatar || '';
         token = localStorage.getItem('xhs_token') || '';
         lastMessageId = 0;
 
+        var isSystem = (peerId == 0);
         var el = getOrCreateOverlay();
         el.style.zIndex = window.nextOverlayZ();
         el.querySelector('.chat-title').textContent = peerName;
 
         var avatarImg = el.querySelector('.chat-avatar-small');
-        avatarImg.src = peerAvatar ? getMediaUrl(peerAvatar) : '';
+        if (isSystem) {
+            avatarImg.src = '';
+            avatarImg.style.display = 'none';
+            avatarImg.style.cursor = '';
+            avatarImg.onclick = null;
+        } else {
+            avatarImg.src = peerAvatar ? getMediaUrl(peerAvatar) : '';
+            avatarImg.style.display = '';
+            avatarImg.style.cursor = 'pointer';
+            avatarImg.onclick = function () {
+                if (window.AuthorProfile && window.AuthorProfile.openUserProfile) {
+                    window.AuthorProfile.openUserProfile(peerId, null);
+                }
+            };
+        }
+
+        el.querySelector('.chat-group-avatar-small').style.display = 'none';
+        el.querySelector('.chat-group-info-btn').style.display = 'none';
+
+        var inputBar = el.querySelector('.chat-input-bar');
+        var reactions = el.querySelector('.chat-reactions');
+        inputBar.style.display = isSystem ? 'none' : '';
+        reactions.style.display = isSystem ? 'none' : '';
 
         el.querySelector('.chat-messages').innerHTML = '';
         el.querySelector('.chat-input').value = '';
         el.querySelector('.chat-send-btn').classList.remove('can-send');
         hideNotePicker();
         hideContextMenu();
+
+        el.classList.add('chat-visible');
+        document.body.style.overflow = 'hidden';
+
+        bindNoteCardClick(el.querySelector('.chat-messages'));
+
+        await loadMessages();
+        if (!isSystem) startPolling();
+    }
+
+    async function openGroupChat(groupId, groupName) {
+        currentMode = 'group';
+        currentGroupId = groupId;
+        currentPeerId = null;
+        currentAuthorId = null;
+        currentAuthorName = groupName;
+        currentAvatarUrl = '';
+        token = localStorage.getItem('xhs_token') || '';
+        lastMessageId = 0;
+
+        var el = getOrCreateOverlay();
+        el.style.zIndex = window.nextOverlayZ();
+        el.querySelector('.chat-title').textContent = groupName;
+
+        var avatarImg = el.querySelector('.chat-avatar-small');
+        avatarImg.style.display = 'none';
+        avatarImg.onclick = null;
+
+        var groupAvatar = el.querySelector('.chat-group-avatar-small');
+        groupAvatar.textContent = (groupName || '群').charAt(0);
+        groupAvatar.style.display = '';
+
+        var groupInfoBtn = el.querySelector('.chat-group-info-btn');
+        groupInfoBtn.style.display = '';
+        groupInfoBtn.onclick = function () { showGroupInfoPanel(groupId); };
+
+        var inputBar = el.querySelector('.chat-input-bar');
+        var reactions = el.querySelector('.chat-reactions');
+        inputBar.style.display = '';
+        reactions.style.display = '';
+
+        el.querySelector('.chat-messages').innerHTML = '';
+        el.querySelector('.chat-input').value = '';
+        el.querySelector('.chat-send-btn').classList.remove('can-send');
+        hideNotePicker();
+        hideContextMenu();
+        hideGroupInfoPanel();
+        hideInvitePanel();
+        stopPolling();
 
         el.classList.add('chat-visible');
         document.body.style.overflow = 'hidden';
@@ -667,8 +788,11 @@
 
         try {
             var url;
-            if (currentMode === 'user') {
-                if (!currentPeerId) return;
+            if (currentMode === 'group') {
+                if (!currentGroupId) return;
+                url = '/web/api/group/messages?group_id=' + currentGroupId + '&token=' + encodeURIComponent(token);
+            } else if (currentMode === 'user') {
+                if (currentPeerId == null) return;
                 url = '/web/api/user/messages?peer_id=' + currentPeerId + '&token=' + encodeURIComponent(token);
             } else {
                 if (!currentAuthorId) return;
@@ -698,12 +822,56 @@
                 var msgEl = document.createElement('div');
                 msgEl.className = 'chat-msg ' + (msg.is_self ? 'msg-self' : 'msg-other');
 
-                var avatarSrc = msg.is_self ? '' : getMediaUrl(currentAvatarUrl);
+                var avatarSrc, senderName;
+                if (currentMode === 'group' && !msg.is_self) {
+                    avatarSrc = msg.sender_avatar ? getMediaUrl(msg.sender_avatar) : '';
+                    senderName = msg.sender_name || '';
+                } else {
+                    avatarSrc = msg.is_self ? '' : getMediaUrl(currentAvatarUrl);
+                    senderName = '';
+                }
+
                 var avatarHtml = avatarSrc
                     ? '<img class="chat-msg-avatar" src="' + avatarSrc + '" referrerpolicy="no-referrer">'
                     : '';
 
-                msgEl.innerHTML = avatarHtml + renderMessageContent(msg.content);
+                var senderHtml = senderName
+                    ? '<div class="chat-msg-sender">' + escapeHtml(senderName) + '</div>'
+                    : '';
+
+                if (senderHtml) {
+                    msgEl.innerHTML = avatarHtml + '<div class="chat-msg-body">' + senderHtml + renderMessageContent(msg.content) + '</div>';
+                } else {
+                    msgEl.innerHTML = avatarHtml + renderMessageContent(msg.content);
+                }
+
+                if (!msg.is_self && currentMode === 'user' && currentPeerId) {
+                    var avatarEl = msgEl.querySelector('.chat-msg-avatar');
+                    if (avatarEl) {
+                        avatarEl.style.cursor = 'pointer';
+                        avatarEl.onclick = function (e) {
+                            e.stopPropagation();
+                            if (window.AuthorProfile && window.AuthorProfile.openUserProfile) {
+                                window.AuthorProfile.openUserProfile(currentPeerId, null);
+                            }
+                        };
+                    }
+                }
+
+                if (!msg.is_self && currentMode === 'group' && msg.sender_id) {
+                    var avatarEl2 = msgEl.querySelector('.chat-msg-avatar');
+                    if (avatarEl2) {
+                        avatarEl2.style.cursor = 'pointer';
+                        (function (sid) {
+                            avatarEl2.onclick = function (e) {
+                                e.stopPropagation();
+                                if (window.AuthorProfile && window.AuthorProfile.openUserProfile) {
+                                    window.AuthorProfile.openUserProfile(sid, null);
+                                }
+                            };
+                        })(msg.sender_id);
+                    }
+                }
 
                 if (msg.id) {
                     bindLongPress(msgEl, msg.id, msg.is_self);
@@ -729,6 +897,7 @@
         if (!content) return;
         if (currentMode === 'user' && !currentPeerId) return;
         if (currentMode === 'author' && !currentAuthorId) return;
+        if (currentMode === 'group' && !currentGroupId) return;
 
         input.value = '';
         overlay.querySelector('.chat-send-btn').classList.remove('can-send');
@@ -745,7 +914,10 @@
 
         try {
             var url, body;
-            if (currentMode === 'user') {
+            if (currentMode === 'group') {
+                url = '/web/api/group/message';
+                body = { group_id: currentGroupId, content: content, token: token };
+            } else if (currentMode === 'user') {
                 url = '/web/api/user/message';
                 body = { receiver_id: currentPeerId, content: content, token: token };
             } else {
@@ -813,12 +985,15 @@
             overlay.classList.remove('chat-visible');
             hideNotePicker();
             hideContextMenu();
+            hideGroupInfoPanel();
+            hideInvitePanel();
             if (!window.AuthorProfile || !window.AuthorProfile.isOpen()) {
                 document.body.style.overflow = '';
             }
         }
         currentAuthorId = null;
         currentPeerId = null;
+        currentGroupId = null;
         currentMode = 'author';
     }
 
@@ -829,13 +1004,23 @@
     function startPolling() {
         stopPolling();
         pollTimer = setInterval(async function () {
-            if (currentMode !== 'user' || !currentPeerId) return;
             try {
-                var resp = await fetch(
-                    '/web/api/user/messages/poll?peer_id=' + currentPeerId +
-                    '&after_id=' + lastMessageId +
-                    '&token=' + encodeURIComponent(token)
-                );
+                var resp;
+                if (currentMode === 'group' && currentGroupId) {
+                    resp = await fetch(
+                        '/web/api/group/messages/poll?group_id=' + currentGroupId +
+                        '&after_id=' + lastMessageId +
+                        '&token=' + encodeURIComponent(token)
+                    );
+                } else if (currentMode === 'user' && currentPeerId) {
+                    resp = await fetch(
+                        '/web/api/user/messages/poll?peer_id=' + currentPeerId +
+                        '&after_id=' + lastMessageId +
+                        '&token=' + encodeURIComponent(token)
+                    );
+                } else {
+                    return;
+                }
                 var newMsgs = await resp.json();
                 if (newMsgs && newMsgs.length) {
                     appendNewMessages(newMsgs);
@@ -871,12 +1056,56 @@
             var msgEl = document.createElement('div');
             msgEl.className = 'chat-msg ' + (msg.is_self ? 'msg-self' : 'msg-other');
 
-            var avatarSrc = msg.is_self ? '' : getMediaUrl(currentAvatarUrl);
+            var avatarSrc, senderName;
+            if (currentMode === 'group' && !msg.is_self) {
+                avatarSrc = msg.sender_avatar ? getMediaUrl(msg.sender_avatar) : '';
+                senderName = msg.sender_name || '';
+            } else {
+                avatarSrc = msg.is_self ? '' : getMediaUrl(currentAvatarUrl);
+                senderName = '';
+            }
+
             var avatarHtml = avatarSrc
                 ? '<img class="chat-msg-avatar" src="' + avatarSrc + '" referrerpolicy="no-referrer">'
                 : '';
 
-            msgEl.innerHTML = avatarHtml + renderMessageContent(msg.content);
+            var senderHtml = senderName
+                ? '<div class="chat-msg-sender">' + escapeHtml(senderName) + '</div>'
+                : '';
+
+            if (senderHtml) {
+                msgEl.innerHTML = avatarHtml + '<div class="chat-msg-body">' + senderHtml + renderMessageContent(msg.content) + '</div>';
+            } else {
+                msgEl.innerHTML = avatarHtml + renderMessageContent(msg.content);
+            }
+
+            if (!msg.is_self && currentMode === 'user' && currentPeerId) {
+                var avatarEl = msgEl.querySelector('.chat-msg-avatar');
+                if (avatarEl) {
+                    avatarEl.style.cursor = 'pointer';
+                    avatarEl.onclick = function (e) {
+                        e.stopPropagation();
+                        if (window.AuthorProfile && window.AuthorProfile.openUserProfile) {
+                            window.AuthorProfile.openUserProfile(currentPeerId, null);
+                        }
+                    };
+                }
+            }
+
+            if (!msg.is_self && currentMode === 'group' && msg.sender_id) {
+                var avatarEl2 = msgEl.querySelector('.chat-msg-avatar');
+                if (avatarEl2) {
+                    avatarEl2.style.cursor = 'pointer';
+                    (function (sid) {
+                        avatarEl2.onclick = function (e) {
+                            e.stopPropagation();
+                            if (window.AuthorProfile && window.AuthorProfile.openUserProfile) {
+                                window.AuthorProfile.openUserProfile(sid, null);
+                            }
+                        };
+                    })(msg.sender_id);
+                }
+            }
 
             if (msg.id) {
                 bindLongPress(msgEl, msg.id, msg.is_self);
@@ -889,9 +1118,271 @@
         scrollToBottom();
     }
 
+    // ========== Group Info Panel ==========
+
+    function getOrCreateGroupInfoPanel() {
+        if (groupInfoPanel && overlay.contains(groupInfoPanel)) return groupInfoPanel;
+        groupInfoPanel = document.createElement('div');
+        groupInfoPanel.className = 'chat-group-info-panel';
+        groupInfoPanel.innerHTML = [
+            '<div class="chat-gip-header">',
+            '  <span>群聊信息</span>',
+            '  <button class="chat-gip-close">✕</button>',
+            '</div>',
+            '<div class="chat-gip-name-section">',
+            '  <label class="chat-gip-label">群名称</label>',
+            '  <div class="chat-gip-name-row">',
+            '    <input class="chat-gip-name-input" maxlength="20" readonly>',
+            '    <button class="chat-gip-name-edit" style="display:none">修改</button>',
+            '  </div>',
+            '</div>',
+            '<div class="chat-gip-members-header">',
+            '  <span>成员</span>',
+            '  <button class="chat-gip-invite-btn">+ 邀请</button>',
+            '</div>',
+            '<div class="chat-gip-member-list"></div>',
+            '<div class="chat-gip-footer">',
+            '  <button class="chat-gip-leave-btn">退出群聊</button>',
+            '</div>',
+        ].join('\n');
+
+        groupInfoPanel.querySelector('.chat-gip-close').onclick = hideGroupInfoPanel;
+        overlay.appendChild(groupInfoPanel);
+        return groupInfoPanel;
+    }
+
+    async function showGroupInfoPanel(groupId) {
+        var panel = getOrCreateGroupInfoPanel();
+        var memberList = panel.querySelector('.chat-gip-member-list');
+        memberList.innerHTML = '<div class="ms-loading">加载中...</div>';
+
+        requestAnimationFrame(function () {
+            panel.classList.add('panel-visible');
+        });
+
+        try {
+            var infoResp = await fetch('/web/api/group/info?group_id=' + groupId + '&token=' + encodeURIComponent(token));
+            var info = await infoResp.json();
+
+            var nameInput = panel.querySelector('.chat-gip-name-input');
+            nameInput.value = info.name || '';
+
+            var currentUserId = null;
+            var userData = null;
+            try {
+                var t = localStorage.getItem('xhs_token');
+                if (t) {
+                    var ur = await fetch('/web/api/user/profile?token=' + encodeURIComponent(t));
+                    userData = await ur.json();
+                    currentUserId = userData.id;
+                }
+            } catch (e) {}
+
+            var isCreator = (currentUserId && info.creator_id == currentUserId);
+            var editBtn = panel.querySelector('.chat-gip-name-edit');
+            if (isCreator) {
+                nameInput.removeAttribute('readonly');
+                editBtn.style.display = '';
+                editBtn.onclick = async function () {
+                    var newName = nameInput.value.trim();
+                    if (!newName) return;
+                    try {
+                        await fetch('/web/api/group/name', {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ token: token, group_id: groupId, name: newName }),
+                        });
+                        overlay.querySelector('.chat-title').textContent = newName;
+                        if (window.showToast) window.showToast('群名已修改');
+                    } catch (e) {
+                        if (window.showToast) window.showToast('修改失败');
+                    }
+                };
+            } else {
+                nameInput.setAttribute('readonly', '');
+                editBtn.style.display = 'none';
+            }
+
+            var membersResp = await fetch('/web/api/group/members?group_id=' + groupId + '&token=' + encodeURIComponent(token));
+            var members = await membersResp.json();
+
+            memberList.innerHTML = '';
+            members.forEach(function (m) {
+                var el = document.createElement('div');
+                el.className = 'chat-member-item';
+                var avatarSrc = m.avatar_url ? getMediaUrl(m.avatar_url) : '';
+                var roleTag = m.role === 'creator' ? '<span class="chat-member-role">群主</span>' : '';
+                var removeBtn = (isCreator && m.role !== 'creator')
+                    ? '<button class="chat-member-remove-btn" data-uid="' + m.user_id + '">移除</button>'
+                    : '';
+
+                el.innerHTML = [
+                    avatarSrc
+                        ? '<img class="chat-member-avatar" src="' + avatarSrc + '" referrerpolicy="no-referrer">'
+                        : '<span class="chat-member-avatar-ph">👤</span>',
+                    '<span class="chat-member-name">' + escapeHtml(m.nickname) + '</span>',
+                    roleTag,
+                    removeBtn,
+                ].join('');
+
+                var rmBtn = el.querySelector('.chat-member-remove-btn');
+                if (rmBtn) {
+                    rmBtn.onclick = async function (e) {
+                        e.stopPropagation();
+                        var uid = parseInt(rmBtn.dataset.uid);
+                        try {
+                            await fetch('/web/api/group/member?group_id=' + groupId + '&user_id=' + uid + '&token=' + encodeURIComponent(token), { method: 'DELETE' });
+                            el.remove();
+                            if (window.showToast) window.showToast('已移除');
+                        } catch (err) {
+                            if (window.showToast) window.showToast('操作失败');
+                        }
+                    };
+                }
+
+                el.onclick = function () {
+                    if (window.AuthorProfile && window.AuthorProfile.openUserProfile) {
+                        window.AuthorProfile.openUserProfile(m.user_id, null);
+                    }
+                };
+
+                memberList.appendChild(el);
+            });
+
+            panel.querySelector('.chat-gip-invite-btn').onclick = function () {
+                showInvitePanel(groupId, members);
+            };
+
+            var leaveBtn = panel.querySelector('.chat-gip-leave-btn');
+            if (isCreator) {
+                leaveBtn.style.display = 'none';
+            } else {
+                leaveBtn.style.display = '';
+                leaveBtn.onclick = async function () {
+                    try {
+                        await fetch('/web/api/group/member?group_id=' + groupId + '&user_id=' + currentUserId + '&token=' + encodeURIComponent(token), { method: 'DELETE' });
+                        hideGroupInfoPanel();
+                        close();
+                        if (window.showToast) window.showToast('已退出群聊');
+                    } catch (e) {
+                        if (window.showToast) window.showToast('操作失败');
+                    }
+                };
+            }
+        } catch (e) {
+            memberList.innerHTML = '<div class="ms-empty">加载失败</div>';
+        }
+    }
+
+    function hideGroupInfoPanel() {
+        if (groupInfoPanel) groupInfoPanel.classList.remove('panel-visible');
+    }
+
+    // ========== Invite Panel ==========
+
+    function getOrCreateInvitePanel() {
+        if (invitePanel && overlay.contains(invitePanel)) return invitePanel;
+        invitePanel = document.createElement('div');
+        invitePanel.className = 'chat-invite-panel';
+        invitePanel.innerHTML = [
+            '<div class="chat-inv-header">',
+            '  <span>邀请好友</span>',
+            '  <button class="chat-inv-close">✕</button>',
+            '</div>',
+            '<div class="chat-inv-list"></div>',
+            '<div class="chat-inv-footer">',
+            '  <button class="chat-inv-confirm-btn">确认邀请</button>',
+            '</div>',
+        ].join('\n');
+
+        invitePanel.querySelector('.chat-inv-close').onclick = hideInvitePanel;
+        overlay.appendChild(invitePanel);
+        return invitePanel;
+    }
+
+    async function showInvitePanel(groupId, existingMembers) {
+        var panel = getOrCreateInvitePanel();
+        var listEl = panel.querySelector('.chat-inv-list');
+        listEl.innerHTML = '<div class="ms-loading">加载中...</div>';
+
+        requestAnimationFrame(function () {
+            panel.classList.add('panel-visible');
+        });
+
+        var existingIds = {};
+        existingMembers.forEach(function (m) { existingIds[m.user_id] = true; });
+
+        try {
+            var resp = await fetch('/web/api/user/mutual-follows?token=' + encodeURIComponent(token));
+            var friends = await resp.json();
+
+            var available = friends.filter(function (f) { return !existingIds[f.id]; });
+            if (!available.length) {
+                listEl.innerHTML = '<div class="ms-empty">没有可邀请的好友</div>';
+                return;
+            }
+
+            listEl.innerHTML = '';
+            available.forEach(function (f) {
+                var el = document.createElement('div');
+                el.className = 'chat-invite-item';
+                var avatarSrc = f.avatar_url ? getMediaUrl(f.avatar_url) : '';
+                el.innerHTML = [
+                    '<input type="checkbox" class="chat-invite-check" data-uid="' + f.id + '">',
+                    avatarSrc
+                        ? '<img class="chat-member-avatar" src="' + avatarSrc + '" referrerpolicy="no-referrer">'
+                        : '<span class="chat-member-avatar-ph">👤</span>',
+                    '<span class="chat-member-name">' + escapeHtml(f.nickname) + '</span>',
+                ].join('');
+                el.onclick = function (e) {
+                    if (e.target.tagName !== 'INPUT') {
+                        var cb = el.querySelector('.chat-invite-check');
+                        cb.checked = !cb.checked;
+                    }
+                };
+                listEl.appendChild(el);
+            });
+
+            panel.querySelector('.chat-inv-confirm-btn').onclick = async function () {
+                var checks = panel.querySelectorAll('.chat-invite-check:checked');
+                if (!checks.length) {
+                    if (window.showToast) window.showToast('请选择要邀请的好友');
+                    return;
+                }
+                var btn = panel.querySelector('.chat-inv-confirm-btn');
+                btn.disabled = true;
+                btn.textContent = '邀请中...';
+                try {
+                    for (var i = 0; i < checks.length; i++) {
+                        await fetch('/web/api/group/member', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ token: token, group_id: groupId, user_id: parseInt(checks[i].dataset.uid) }),
+                        });
+                    }
+                    hideInvitePanel();
+                    showGroupInfoPanel(groupId);
+                    if (window.showToast) window.showToast('邀请成功');
+                } catch (e) {
+                    if (window.showToast) window.showToast('邀请失败');
+                } finally {
+                    btn.disabled = false;
+                    btn.textContent = '确认邀请';
+                }
+            };
+        } catch (e) {
+            listEl.innerHTML = '<div class="ms-empty">加载失败</div>';
+        }
+    }
+
+    function hideInvitePanel() {
+        if (invitePanel) invitePanel.classList.remove('panel-visible');
+    }
+
     window.ChatUI = {
         open: open,
         openUserChat: openUserChat,
+        openGroupChat: openGroupChat,
         close: close,
         isOpen: isOpen,
     };

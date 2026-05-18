@@ -1636,7 +1636,7 @@ body {
 
 .viewer-counter {
     position: absolute;
-    bottom: 5vh;
+    bottom: -10vh;
     left: 50%;
     transform: translateX(-50%);
     background: rgba(0, 0, 0, 0.5);
@@ -1649,6 +1649,7 @@ body {
 }
 
 .viewer-close {
+    display: none;
     position: absolute;
     top: 4vh;
     right: 5vw;
@@ -1661,7 +1662,6 @@ body {
     font-size: 2.5vh;
     cursor: pointer;
     z-index: 3002;
-    display: flex;
     align-items: center;
     justify-content: center;
     transition: background 0.2s;
@@ -1698,6 +1698,15 @@ body {
 
 @media (max-width: 768px) {
     .viewer-nav { display: none; } /* 移动端靠滑动，隐藏按钮 */
+}
+
+.viewer-hero-clone {
+    position: fixed;
+    pointer-events: none;
+    object-fit: contain;
+    background: transparent;
+    will-change: left, top, width, height;
+    z-index: 99999;
 }
 
 /* 瀑布流查看器样式 */

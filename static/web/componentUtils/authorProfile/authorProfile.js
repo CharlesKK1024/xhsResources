@@ -497,7 +497,12 @@
             };
 
             el.querySelector('.ap-works-count').textContent = data.work_count + ' 篇';
-            renderWorks(el, currentWorks);
+            if (!data.is_mutual && currentWorks.length === 0 && data.work_count > 0) {
+                el.querySelector('.ap-works-grid').innerHTML =
+                    '<div class="ap-loading" style="min-height:20vh;display:flex;align-items:center;justify-content:center;font-size:1.6vh">🔒 相互关注后可以查看对方的典藏作品集</div>';
+            } else {
+                renderWorks(el, currentWorks);
+            }
         } catch (e) {
             el.querySelector('.ap-works-grid').innerHTML = '<div class="ap-loading">网络错误</div>';
         }

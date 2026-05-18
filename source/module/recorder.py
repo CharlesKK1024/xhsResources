@@ -317,6 +317,44 @@ class WebRecorder(IDRecorder):
             PRIMARY KEY (follower_id, following_id)
             );"""
         )
+        # 群组表
+        await self.database.execute(
+            """CREATE TABLE IF NOT EXISTS groups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            creator_id INTEGER NOT NULL,
+            avatar_url TEXT DEFAULT '',
+            created_at TEXT
+            );"""
+        )
+        await self.database.execute(
+            """CREATE TABLE IF NOT EXISTS group_members (
+            group_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            role TEXT DEFAULT 'member',
+            joined_at TEXT,
+            PRIMARY KEY (group_id, user_id)
+            );"""
+        )
+        await self.database.execute(
+            """CREATE TABLE IF NOT EXISTS group_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_id INTEGER NOT NULL,
+            sender_id INTEGER NOT NULL,
+            content TEXT NOT NULL,
+            created_at TEXT
+            );"""
+        )
+        await self.database.execute(
+            "CREATE INDEX IF NOT EXISTS idx_gm_group ON group_messages(group_id, id);"
+        )
+        await self.database.commit()
+        # 确保系统通知用户存在 (id=0)
+        await self.database.execute(
+            """INSERT OR IGNORE INTO users (id, nickname, password_hash, avatar_url, theme, token, created_at)
+               VALUES (0, '系统通知', '', '', 'dark', NULL, ?);""",
+            (datetime.now().strftime("%Y-%m-%d %H:%M:%S"),),
+        )
         await self.database.commit()
 
     async def add_history(self, note_id: str, data: dict, author_id: str, author_name: str, source_url: str = None, user_id: int = 1):
@@ -964,3 +1002,184 @@ class WebRecorder(IDRecorder):
         )
         followers = (await self.cursor.fetchone())[0]
         return {"following_count": following, "followers_count": followers}
+
+    async def is_mutual_following(self, user_a: int, user_b: int) -> bool:
+        await self.cursor.execute(
+            """SELECT COUNT(*) FROM user_follows
+               WHERE (follower_id = ? AND following_id = ?)
+                  OR (follower_id = ? AND following_id = ?);""",
+            (user_a, user_b, user_b, user_a),
+        )
+        count = (await self.cursor.fetchone())[0]
+        return count >= 2
+
+    # ========== 群组相关 ==========
+
+    async def create_group(self, creator_id: int, name: str) -> dict:
+        created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        await self.database.execute(
+            "INSERT INTO groups (name, creator_id, created_at) VALUES (?, ?, ?);",
+            (name, creator_id, created_at),
+        )
+        await self.database.commit()
+        await self.cursor.execute("SELECT last_insert_rowid()")
+        group_id = (await self.cursor.fetchone())[0]
+        await self.database.execute(
+            "INSERT INTO group_members (group_id, user_id, role, joined_at) VALUES (?, ?, 'creator', ?);",
+            (group_id, creator_id, created_at),
+        )
+        await self.database.commit()
+        return {"id": group_id, "name": name, "creator_id": creator_id, "created_at": created_at}
+
+    async def get_user_groups(self, user_id: int) -> list:
+        await self.cursor.execute(
+            """SELECT g.id, g.name, g.creator_id, g.avatar_url, g.created_at,
+                      gm_last.content, gm_last.created_at AS last_time,
+                      gm_last.sender_id
+               FROM group_members mem
+               JOIN groups g ON g.id = mem.group_id
+               LEFT JOIN (
+                   SELECT group_id, content, created_at, sender_id
+                   FROM group_messages
+                   WHERE id IN (SELECT MAX(id) FROM group_messages GROUP BY group_id)
+               ) gm_last ON gm_last.group_id = g.id
+               WHERE mem.user_id = ?
+               ORDER BY COALESCE(gm_last.created_at, g.created_at) DESC""",
+            (user_id,),
+        )
+        rows = await self.cursor.fetchall()
+        groups = []
+        for r in rows:
+            sender_name = ""
+            if r[7]:
+                sender = await self.get_user_by_id(r[7])
+                sender_name = sender["nickname"] if sender else ""
+            await self.cursor.execute(
+                "SELECT COUNT(*) FROM group_members WHERE group_id = ?", (r[0],)
+            )
+            member_count = (await self.cursor.fetchone())[0]
+            groups.append({
+                "group_id": r[0],
+                "name": r[1],
+                "creator_id": r[2],
+                "avatar_url": r[3] or "",
+                "last_message": r[5] or "",
+                "last_time": r[6] or r[4],
+                "last_sender_name": sender_name,
+                "member_count": member_count,
+            })
+        return groups
+
+    async def add_group_member(self, group_id: int, user_id: int):
+        joined_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        await self.database.execute(
+            "INSERT OR IGNORE INTO group_members (group_id, user_id, role, joined_at) VALUES (?, ?, 'member', ?);",
+            (group_id, user_id, joined_at),
+        )
+        await self.database.commit()
+
+    async def remove_group_member(self, group_id: int, user_id: int):
+        await self.database.execute(
+            "DELETE FROM group_members WHERE group_id = ? AND user_id = ? AND role != 'creator';",
+            (group_id, user_id),
+        )
+        await self.database.commit()
+
+    async def get_group_members(self, group_id: int) -> list:
+        await self.cursor.execute(
+            """SELECT gm.user_id, gm.role, gm.joined_at, u.nickname, u.avatar_url
+               FROM group_members gm
+               JOIN users u ON u.id = gm.user_id
+               WHERE gm.group_id = ?
+               ORDER BY CASE gm.role WHEN 'creator' THEN 0 ELSE 1 END, gm.joined_at ASC""",
+            (group_id,),
+        )
+        rows = await self.cursor.fetchall()
+        return [{"user_id": r[0], "role": r[1], "joined_at": r[2],
+                 "nickname": r[3], "avatar_url": r[4] or ""} for r in rows]
+
+    async def send_group_message(self, group_id: int, sender_id: int, content: str) -> int:
+        created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        await self.database.execute(
+            "INSERT INTO group_messages (group_id, sender_id, content, created_at) VALUES (?, ?, ?, ?);",
+            (group_id, sender_id, content, created_at),
+        )
+        await self.database.commit()
+        await self.cursor.execute("SELECT last_insert_rowid()")
+        row = await self.cursor.fetchone()
+        return row[0] if row else 0
+
+    async def get_group_messages(self, group_id: int, user_id: int, limit: int = 100) -> list:
+        await self.cursor.execute(
+            """SELECT gm.id, gm.sender_id, gm.content, gm.created_at,
+                      u.nickname, u.avatar_url
+               FROM group_messages gm
+               JOIN users u ON u.id = gm.sender_id
+               WHERE gm.group_id = ?
+               ORDER BY gm.id ASC LIMIT ?""",
+            (group_id, limit),
+        )
+        rows = await self.cursor.fetchall()
+        return [{"id": r[0], "sender_id": r[1], "content": r[2], "time": r[3],
+                 "sender_name": r[4], "sender_avatar": r[5] or "",
+                 "is_self": r[1] == user_id} for r in rows]
+
+    async def get_new_group_messages(self, group_id: int, user_id: int, after_id: int) -> list:
+        await self.cursor.execute(
+            """SELECT gm.id, gm.sender_id, gm.content, gm.created_at,
+                      u.nickname, u.avatar_url
+               FROM group_messages gm
+               JOIN users u ON u.id = gm.sender_id
+               WHERE gm.group_id = ? AND gm.id > ?
+               ORDER BY gm.id ASC""",
+            (group_id, after_id),
+        )
+        rows = await self.cursor.fetchall()
+        return [{"id": r[0], "sender_id": r[1], "content": r[2], "time": r[3],
+                 "sender_name": r[4], "sender_avatar": r[5] or "",
+                 "is_self": r[1] == user_id} for r in rows]
+
+    async def delete_group_message(self, message_id: int, user_id: int):
+        await self.database.execute(
+            "DELETE FROM group_messages WHERE id = ? AND sender_id = ?;",
+            (message_id, user_id),
+        )
+        await self.database.commit()
+
+    async def get_group_info(self, group_id: int) -> dict | None:
+        await self.cursor.execute(
+            "SELECT id, name, creator_id, avatar_url, created_at FROM groups WHERE id = ?",
+            (group_id,),
+        )
+        row = await self.cursor.fetchone()
+        if not row:
+            return None
+        return {"id": row[0], "name": row[1], "creator_id": row[2],
+                "avatar_url": row[3] or "", "created_at": row[4]}
+
+    async def update_group_name(self, group_id: int, name: str):
+        await self.database.execute(
+            "UPDATE groups SET name = ? WHERE id = ?;", (name, group_id),
+        )
+        await self.database.commit()
+
+    async def is_group_member(self, group_id: int, user_id: int) -> bool:
+        await self.cursor.execute(
+            "SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?;",
+            (group_id, user_id),
+        )
+        return await self.cursor.fetchone() is not None
+
+    async def get_mutual_follows(self, user_id: int) -> list:
+        await self.cursor.execute(
+            """SELECT u.id, u.nickname, u.avatar_url
+               FROM user_follows f1
+               JOIN user_follows f2 ON f1.following_id = f2.follower_id
+                                    AND f1.follower_id = f2.following_id
+               JOIN users u ON u.id = f1.following_id
+               WHERE f1.follower_id = ?
+               ORDER BY u.nickname ASC""",
+            (user_id,),
+        )
+        rows = await self.cursor.fetchall()
+        return [{"id": r[0], "nickname": r[1], "avatar_url": r[2] or ""} for r in rows]

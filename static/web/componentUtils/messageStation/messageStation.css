@@ -113,6 +113,18 @@
 .ms-conv-avatar { width: 100%; height: 100%; object-fit: cover; }
 .ms-conv-avatar-ph { font-size: 2.5vh; }
 
+.ms-system-icon {
+    font-size: 2.2vh;
+    background: linear-gradient(135deg, #ff9500, #ff5e3a);
+    border-radius: 50%;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+}
+
 .ms-conv-info { flex: 1; min-width: 0; }
 
 .ms-conv-top {
@@ -233,6 +245,251 @@
     position: relative;
 }
 
+/* ========== Groups tab ========== */
+.ms-groups-header {
+    padding: 1.5vh 3vw;
+    display: flex;
+    justify-content: flex-end;
+}
+
+.ms-create-group-btn {
+    padding: 0.8vh 4vw;
+    background: var(--primary-color);
+    color: #fff;
+    border: none;
+    border-radius: 2vh;
+    font-size: 1.3vh;
+    cursor: pointer;
+    transition: opacity 0.15s;
+}
+
+.ms-create-group-btn:hover { opacity: 0.85; }
+
+.ms-group-item {
+    display: flex;
+    align-items: center;
+    padding: 1.5vh 3vw;
+    gap: 2.5vw;
+    border-bottom: 1px solid var(--border-color);
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.ms-group-item:hover { background: var(--hover-bg); }
+.ms-group-item:active { background: var(--hover-bg); }
+
+.ms-group-avatar-wrap {
+    width: 5.5vh;
+    height: 5.5vh;
+    border-radius: 1.2vh;
+    overflow: hidden;
+    flex-shrink: 0;
+    background: linear-gradient(135deg, var(--primary-color), #ff6b81);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2.2vh;
+    color: #fff;
+    font-weight: 600;
+}
+
+.ms-group-info { flex: 1; min-width: 0; }
+
+.ms-group-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.ms-group-name {
+    font-size: 1.5vh;
+    font-weight: 600;
+    color: var(--text-main);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ms-group-time {
+    font-size: 1.1vh;
+    color: var(--text-muted);
+    flex-shrink: 0;
+    margin-left: 1vw;
+}
+
+.ms-group-bottom {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 0.3vh;
+}
+
+.ms-group-preview {
+    font-size: 1.2vh;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+}
+
+.ms-group-member-count {
+    font-size: 1vh;
+    color: var(--text-muted);
+    flex-shrink: 0;
+    margin-left: 1vw;
+}
+
+/* ========== Create Group Panel ========== */
+.ms-create-group-panel {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 70vh;
+    background: var(--bg-color);
+    border-top: 1px solid var(--border-color);
+    border-radius: 2vh 2vh 0 0;
+    display: flex;
+    flex-direction: column;
+    z-index: 9550;
+    transform: translateY(100%);
+    transition: transform 0.3s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.ms-create-group-panel.panel-visible {
+    transform: translateY(0);
+}
+
+.ms-cgp-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1.5vh 4vw;
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+.ms-cgp-header span {
+    font-size: 1.6vh;
+    font-weight: 600;
+    color: var(--text-main);
+}
+
+.ms-cgp-close {
+    background: none;
+    border: none;
+    font-size: 2vh;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0 1vw;
+}
+
+.ms-cgp-name-row {
+    padding: 1.5vh 4vw;
+    flex-shrink: 0;
+}
+
+.ms-cgp-name-input {
+    width: 100%;
+    border: 1px solid var(--border-color);
+    border-radius: 1vh;
+    padding: 1vh 3vw;
+    font-size: 1.4vh;
+    background-color: var(--input-bg);
+    color: var(--text-main);
+    outline: none;
+    box-sizing: border-box;
+}
+
+.ms-cgp-name-input::placeholder { color: var(--text-muted); }
+
+.ms-cgp-section-title {
+    padding: 0.5vh 4vw 1vh;
+    font-size: 1.2vh;
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.ms-cgp-friend-list {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 0 4vw;
+}
+
+.ms-cgp-friend-item {
+    display: flex;
+    align-items: center;
+    gap: 2.5vw;
+    padding: 1.2vh 0;
+    border-bottom: 1px solid var(--border-color);
+    cursor: pointer;
+}
+
+.ms-cgp-check {
+    width: 2vh;
+    height: 2vh;
+    accent-color: var(--primary-color);
+    flex-shrink: 0;
+}
+
+.ms-cgp-friend-avatar-wrap {
+    width: 4vh;
+    height: 4vh;
+    border-radius: 50%;
+    overflow: hidden;
+    flex-shrink: 0;
+    background: var(--card-bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.ms-cgp-friend-avatar { width: 100%; height: 100%; object-fit: cover; }
+.ms-cgp-friend-avatar-ph { font-size: 2vh; }
+
+.ms-cgp-friend-name {
+    font-size: 1.4vh;
+    font-weight: 500;
+    color: var(--text-main);
+    flex: 1;
+}
+
+.ms-cgp-footer {
+    padding: 1.5vh 4vw;
+    padding-bottom: calc(1.5vh + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+.ms-cgp-confirm-btn {
+    width: 100%;
+    padding: 1.2vh 0;
+    background: var(--primary-color);
+    color: #fff;
+    border: none;
+    border-radius: 1vh;
+    font-size: 1.5vh;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s;
+}
+
+.ms-cgp-confirm-btn:hover { opacity: 0.85; }
+.ms-cgp-confirm-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Dark theme for create group panel */
+[data-theme="dark"] .ms-create-group-panel {
+    background-color: #121212;
+    border-top-color: #333;
+}
+
+[data-theme="dark"] .ms-cgp-header { border-bottom-color: #333; }
+[data-theme="dark"] .ms-cgp-friend-item { border-bottom-color: #333; }
+[data-theme="dark"] .ms-cgp-footer { border-top-color: #333; }
+
+/* Badge on header button */
 .msg-badge {
     position: absolute;
     top: -0.3vh;
