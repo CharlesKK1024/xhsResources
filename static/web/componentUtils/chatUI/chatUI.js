@@ -19,6 +19,13 @@
     var lastRawTime = null;
     var groupInfoPanel = null;
     var invitePanel = null;
+    var CHAT_CACHE_LIMIT = 100;
+    var CHAT_CACHE_TTLS = {
+        author: 15000,
+        user: 8000,
+        group: 8000,
+        groupInfo: 30000
+    };
 
     var REACTIONS = [
         { emoji: '🐱', label: '棒' },
@@ -96,126 +103,131 @@
             }
         });
 
-        bindSwipeClose(overlay);
+        window.bindOverlaySwipeClose(overlay, {
+            onClose: close,
+            shouldIgnoreTarget: function (target) {
+                return !!target.closest('button, a, input, .chat-msg-bubble, .chat-note-card');
+            }
+        });
 
         return overlay;
     }
 
-    function bindSwipeClose(el) {
-        var startX = 0, startY = 0, gesture = '', startTime = 0;
-
-        el.addEventListener('touchstart', function (e) {
-            startX = e.touches[0].clientX;
-            startY = e.touches[0].clientY;
-            startTime = Date.now();
-            gesture = '';
-            el.style.transition = 'none';
-        }, { passive: true });
-
-        el.addEventListener('touchmove', function (e) {
-            var touch = e.touches[0];
-            var dx = touch.clientX - startX;
-            var dy = touch.clientY - startY;
-            var ax = Math.abs(dx);
-            var ay = Math.abs(dy);
-
-            if (!gesture && (ax > 10 || ay > 10)) {
-                gesture = ax > ay ? 'horizontal' : 'vertical';
-            }
-
-            if (gesture === 'horizontal' && dx > 0) {
-                if (e.cancelable) e.preventDefault();
-                var progress = Math.min(dx / (window.innerWidth * 0.45), 1);
-                var scale = 1 - progress * 0.15;
-                var radius = progress * 20;
-                el.style.transform = 'translateX(' + dx + 'px) scale(' + scale + ')';
-                el.style.borderRadius = radius + 'px';
-            }
-        }, { passive: false });
-
-        el.addEventListener('touchend', function (e) {
-            if (gesture === 'horizontal') {
-                var dx = e.changedTouches[0].clientX - startX;
-                var progress = dx / (window.innerWidth * 0.45);
-                var velocity = dx / (Date.now() - startTime);
-
-                if (progress > 0.35 || velocity > 0.5) {
-                    el.style.transition = 'all 0.3s cubic-bezier(0.23, 1, 0.32, 1)';
-                    el.style.transform = 'translateX(100%) scale(0.85)';
-                    el.style.borderRadius = '20px';
-                    setTimeout(function () {
-                        close();
-                        el.style.transform = '';
-                        el.style.borderRadius = '';
-                        el.style.transition = '';
-                    }, 300);
-                } else {
-                    el.style.transition = 'all 0.3s cubic-bezier(0.23, 1, 0.32, 1)';
-                    el.style.transform = '';
-                    el.style.borderRadius = '';
-                }
-            }
-            gesture = '';
-        }, { passive: true });
-
-        var mouseDown = false, mouseStartX = 0, mouseStartTime = 0;
-
-        el.addEventListener('mousedown', function (e) {
-            if (e.target.closest('button, a, input, .chat-msg-bubble, .chat-note-card')) return;
-            mouseDown = true;
-            mouseStartX = e.clientX;
-            mouseStartTime = Date.now();
-            gesture = '';
-            el.style.transition = 'none';
-        });
-
-        window.addEventListener('mousemove', function (e) {
-            if (!mouseDown) return;
-            var dx = e.clientX - mouseStartX;
-            if (!gesture && Math.abs(dx) > 10) gesture = 'horizontal';
-            if (gesture === 'horizontal' && dx > 0) {
-                var progress = Math.min(dx / (window.innerWidth * 0.45), 1);
-                var scale = 1 - progress * 0.15;
-                var radius = progress * 20;
-                el.style.transform = 'translateX(' + dx + 'px) scale(' + scale + ')';
-                el.style.borderRadius = radius + 'px';
-            }
-        });
-
-        window.addEventListener('mouseup', function (e) {
-            if (!mouseDown) return;
-            mouseDown = false;
-            if (gesture === 'horizontal') {
-                var dx = e.clientX - mouseStartX;
-                var progress = dx / (window.innerWidth * 0.45);
-                var velocity = dx / (Date.now() - mouseStartTime);
-
-                if (progress > 0.35 || velocity > 0.5) {
-                    el.style.transition = 'all 0.3s cubic-bezier(0.23, 1, 0.32, 1)';
-                    el.style.transform = 'translateX(100%) scale(0.85)';
-                    el.style.borderRadius = '20px';
-                    setTimeout(function () {
-                        close();
-                        el.style.transform = '';
-                        el.style.borderRadius = '';
-                        el.style.transition = '';
-                    }, 300);
-                } else {
-                    el.style.transition = 'all 0.3s cubic-bezier(0.23, 1, 0.32, 1)';
-                    el.style.transform = '';
-                    el.style.borderRadius = '';
-                }
-            }
-            gesture = '';
-        });
-    }
-
     function getMediaUrl(url) {
         if (!url) return '';
-        if (typeof url === 'string' && url.startsWith('/web/cache')) return url;
-        var isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-        if (isMobile) return url;
-        return '/web/api/proxy?url=' + encodeURIComponent(url);
+        if (typeof url === 'string' && url.includes('xhscdn.com') && url.startsWith('http://')) {
+            return 'https://' + url.slice('http://'.length);
+        }
+        return url;
+    }
+
+    function getAvatarUrl(url) {
+        if (!url) return '';
+        return getMediaUrl(url);
+    }
+
+    function getNoteCoverUrl(note) {
+        if (!note) return '';
+        return getMediaUrl(note.raw_cover || note.cover || '');
+    }
+
+    function getCacheApi() {
+        return window.XHSUICache || null;
+    }
+
+    function getCacheScope() {
+        return token ? token.slice(-16) : 'guest';
+    }
+
+    function getMessagesCacheKey() {
+        if (currentMode === 'group') return 'chat:' + getCacheScope() + ':group:' + currentGroupId + ':messages';
+        if (currentMode === 'user') return 'chat:' + getCacheScope() + ':user:' + currentPeerId + ':messages';
+        return 'chat:' + getCacheScope() + ':author:' + currentAuthorId + ':messages';
+    }
+
+    function getGroupInfoCacheKey(groupId) {
+        return 'chat:' + getCacheScope() + ':group:' + groupId + ':info';
+    }
+
+    function getCurrentUserCacheKey() {
+        return 'chat:' + getCacheScope() + ':current-user';
+    }
+
+    function getMessagesCacheTtl() {
+        return CHAT_CACHE_TTLS[currentMode] || 0;
+    }
+
+    function pruneMessages(messages) {
+        if (!messages || !messages.length) return [];
+        return messages.slice(-CHAT_CACHE_LIMIT);
+    }
+
+    function peekMessagesCache() {
+        var cache = getCacheApi();
+        if (!cache) return null;
+        return cache.peek(getMessagesCacheKey(), getMessagesCacheTtl());
+    }
+
+    function setMessagesCache(messages) {
+        var cache = getCacheApi();
+        if (!cache) return;
+        cache.set(getMessagesCacheKey(), pruneMessages(messages), { maxPersistBytes: 160 * 1024 });
+    }
+
+    function rememberRenderedMessages(messages) {
+        if (!overlay) return;
+        overlay._chatMessages = pruneMessages(messages);
+        setMessagesCache(overlay._chatMessages);
+    }
+
+    function getRenderedMessages() {
+        if (!overlay || !overlay._chatMessages) return [];
+        return overlay._chatMessages.slice();
+    }
+
+    function invalidateConversationSummaries() {
+        var cache = getCacheApi();
+        if (!cache) return;
+        var scope = 'ms:' + getCacheScope() + ':';
+        cache.remove(scope + 'conversations');
+        if (currentMode === 'group') cache.remove(scope + 'groups');
+    }
+
+    function peekGroupInfoCache(groupId) {
+        var cache = getCacheApi();
+        if (!cache || !groupId) return null;
+        return cache.peek(getGroupInfoCacheKey(groupId), CHAT_CACHE_TTLS.groupInfo);
+    }
+
+    function setGroupInfoCache(groupId, data) {
+        var cache = getCacheApi();
+        if (!cache || !groupId) return;
+        cache.set(getGroupInfoCacheKey(groupId), data, { maxPersistBytes: 120 * 1024 });
+    }
+
+    function removeGroupInfoCache(groupId) {
+        var cache = getCacheApi();
+        if (!cache || !groupId) return;
+        cache.remove(getGroupInfoCacheKey(groupId));
+    }
+
+    async function getCurrentUserProfile() {
+        var cache = getCacheApi();
+        var cacheKey = getCurrentUserCacheKey();
+        var cached = cache ? cache.get(cacheKey, 30000) : null;
+        if (cached) return cached;
+
+        var localToken = localStorage.getItem('xhs_token');
+        if (!localToken) return null;
+
+        var resp = await fetch('/web/api/user/profile?token=' + encodeURIComponent(localToken));
+        if (!resp.ok) return null;
+
+        var data = await resp.json();
+        if (cache && data) {
+            cache.set(cacheKey, data, { maxPersistBytes: 12 * 1024 });
+        }
+        return data;
     }
 
     // ========== Message Content Rendering ==========
@@ -245,7 +257,7 @@
     }
 
     function renderFollowCardBubble(card) {
-        var avatarSrc = card.avatar_url ? getMediaUrl(card.avatar_url) : '';
+        var avatarSrc = card.avatar_url ? getAvatarUrl(card.avatar_url) : '';
         var avatarHtml = avatarSrc
             ? '<img class="chat-follow-card-avatar" src="' + avatarSrc + '" referrerpolicy="no-referrer">'
             : '<span class="chat-follow-card-avatar-ph">👤</span>';
@@ -567,7 +579,7 @@
                 var el = document.createElement('div');
                 el.className = 'chat-picker-item';
                 el.innerHTML =
-                    '<img class="chat-picker-cover" src="' + getMediaUrl(note.cover || '') + '" ' +
+                    '<img class="chat-picker-cover" src="' + getNoteCoverUrl(note) + '" ' +
                         'loading="lazy" referrerpolicy="no-referrer">' +
                     '<div class="chat-picker-info">' +
                         '<div class="chat-picker-title">' + escapeHtml(note.title || '无标题') + '</div>' +
@@ -595,7 +607,7 @@
             type: 'note_card',
             noteId: note.id,
             title: note.title || '无标题',
-            cover: note.cover || note.raw_cover || '',
+            cover: note.raw_cover || note.cover || '',
             author: note.author || '',
             authorId: note.authorId || '',
         };
@@ -656,7 +668,7 @@
         el.querySelector('.chat-title').textContent = authorName;
 
         var avatarImg = el.querySelector('.chat-avatar-small');
-        avatarImg.src = getMediaUrl(currentAvatarUrl);
+        avatarImg.src = getAvatarUrl(currentAvatarUrl);
         avatarImg.style.display = '';
         avatarImg.style.cursor = '';
         avatarImg.onclick = null;
@@ -701,7 +713,7 @@
             avatarImg.style.cursor = '';
             avatarImg.onclick = null;
         } else {
-            avatarImg.src = peerAvatar ? getMediaUrl(peerAvatar) : '';
+            avatarImg.src = peerAvatar ? getAvatarUrl(peerAvatar) : '';
             avatarImg.style.display = '';
             avatarImg.style.cursor = 'pointer';
             avatarImg.onclick = function () {
@@ -824,10 +836,10 @@
 
                 var avatarSrc, senderName;
                 if (currentMode === 'group' && !msg.is_self) {
-                    avatarSrc = msg.sender_avatar ? getMediaUrl(msg.sender_avatar) : '';
+                    avatarSrc = msg.sender_avatar ? getAvatarUrl(msg.sender_avatar) : '';
                     senderName = msg.sender_name || '';
                 } else {
-                    avatarSrc = msg.is_self ? '' : getMediaUrl(currentAvatarUrl);
+                    avatarSrc = msg.is_self ? '' : getAvatarUrl(currentAvatarUrl);
                     senderName = '';
                 }
 
@@ -1058,10 +1070,10 @@
 
             var avatarSrc, senderName;
             if (currentMode === 'group' && !msg.is_self) {
-                avatarSrc = msg.sender_avatar ? getMediaUrl(msg.sender_avatar) : '';
+                avatarSrc = msg.sender_avatar ? getAvatarUrl(msg.sender_avatar) : '';
                 senderName = msg.sender_name || '';
             } else {
-                avatarSrc = msg.is_self ? '' : getMediaUrl(currentAvatarUrl);
+                avatarSrc = msg.is_self ? '' : getAvatarUrl(currentAvatarUrl);
                 senderName = '';
             }
 
@@ -1118,6 +1130,432 @@
         scrollToBottom();
     }
 
+    /* function appendRenderedMessage(messagesEl, msg) {
+        if (msg.time && shouldShowTime(lastRawTime, msg.time)) {
+            var divider = document.createElement('div');
+            divider.className = 'chat-time-divider';
+            divider.textContent = formatTime(msg.time);
+            messagesEl.appendChild(divider);
+        }
+        lastRawTime = msg.time;
+
+        var msgEl = document.createElement('div');
+        msgEl.className = 'chat-msg ' + (msg.is_self ? 'msg-self' : 'msg-other');
+
+        var avatarSrc, senderName;
+        if (currentMode === 'group' && !msg.is_self) {
+            avatarSrc = msg.sender_avatar ? getAvatarUrl(msg.sender_avatar) : '';
+            senderName = msg.sender_name || '';
+        } else {
+            avatarSrc = msg.is_self ? '' : getAvatarUrl(currentAvatarUrl);
+            senderName = '';
+        }
+
+        var avatarHtml = avatarSrc
+            ? '<img class="chat-msg-avatar" src="' + avatarSrc + '" referrerpolicy="no-referrer">'
+            : '';
+
+        var senderHtml = senderName
+            ? '<div class="chat-msg-sender">' + escapeHtml(senderName) + '</div>'
+            : '';
+
+        if (senderHtml) {
+            msgEl.innerHTML = avatarHtml + '<div class="chat-msg-body">' + senderHtml + renderMessageContent(msg.content) + '</div>';
+        } else {
+            msgEl.innerHTML = avatarHtml + renderMessageContent(msg.content);
+        }
+
+        if (!msg.is_self && currentMode === 'user' && currentPeerId) {
+            var avatarEl = msgEl.querySelector('.chat-msg-avatar');
+            if (avatarEl) {
+                avatarEl.style.cursor = 'pointer';
+                avatarEl.onclick = function (e) {
+                    e.stopPropagation();
+                    if (window.AuthorProfile && window.AuthorProfile.openUserProfile) {
+                        window.AuthorProfile.openUserProfile(currentPeerId, null);
+                    }
+                };
+            }
+        }
+
+        if (!msg.is_self && currentMode === 'group' && msg.sender_id) {
+            var avatarEl2 = msgEl.querySelector('.chat-msg-avatar');
+            if (avatarEl2) {
+                avatarEl2.style.cursor = 'pointer';
+                (function (sid) {
+                    avatarEl2.onclick = function (e) {
+                        e.stopPropagation();
+                        if (window.AuthorProfile && window.AuthorProfile.openUserProfile) {
+                            window.AuthorProfile.openUserProfile(sid, null);
+                        }
+                    };
+                })(msg.sender_id);
+            }
+        }
+
+        if (msg.id) {
+            bindLongPress(msgEl, msg.id, msg.is_self);
+            if (msg.id > lastMessageId) lastMessageId = msg.id;
+        }
+
+        messagesEl.appendChild(msgEl);
+    }
+
+    function renderMessages(messages) {
+        if (!overlay) return;
+        var messagesEl = overlay.querySelector('.chat-messages');
+        lastMessageId = 0;
+        lastRawTime = null;
+        messagesEl.innerHTML = '';
+
+        var normalized = pruneMessages(messages || []);
+        if (!normalized.length) {
+            overlay._chatMessages = [];
+            messagesEl.innerHTML = '<div class="chat-empty">鏆傛棤娑堟伅锛屽彂閫佺涓€鏉″惂</div>';
+            setMessagesCache([]);
+            return;
+        }
+
+        normalized.forEach(function (msg) {
+            appendRenderedMessage(messagesEl, msg);
+        });
+        rememberRenderedMessages(normalized);
+        scrollToBottom();
+    }
+
+    async function loadMessages() {
+        if (!overlay) return;
+        var messagesEl = overlay.querySelector('.chat-messages');
+        var cached = peekMessagesCache();
+
+        if (cached) {
+            renderMessages(cached.data);
+        } else {
+            messagesEl.innerHTML = '<div class="chat-empty">鍔犺浇涓?..</div>';
+        }
+
+        try {
+            var url;
+            if (currentMode === 'group') {
+                if (!currentGroupId) return;
+                url = '/web/api/group/messages?group_id=' + currentGroupId + '&token=' + encodeURIComponent(token);
+            } else if (currentMode === 'user') {
+                if (currentPeerId == null) return;
+                url = '/web/api/user/messages?peer_id=' + currentPeerId + '&token=' + encodeURIComponent(token);
+            } else {
+                if (!currentAuthorId) return;
+                url = '/web/api/author/messages?author_id=' + encodeURIComponent(currentAuthorId) + '&token=' + encodeURIComponent(token);
+            }
+
+            var resp = await fetch(url);
+            var messages = await resp.json();
+            renderMessages(messages || []);
+        } catch (e) {
+            if (!cached) {
+                messagesEl.innerHTML = '<div class="chat-empty">鍔犺浇娑堟伅澶辫触</div>';
+            }
+        }
+    }
+
+    function appendNewMessages(messages) {
+        if (!overlay) return;
+        var messagesEl = overlay.querySelector('.chat-messages');
+        var empty = messagesEl.querySelector('.chat-empty');
+        if (empty) empty.remove();
+
+        var merged = getRenderedMessages();
+        var changed = false;
+
+        messages.forEach(function (msg) {
+            if (msg.id && msg.id <= lastMessageId) return;
+            appendRenderedMessage(messagesEl, msg);
+            merged.push(msg);
+            changed = true;
+        });
+
+        if (changed) {
+            rememberRenderedMessages(merged);
+            invalidateConversationSummaries();
+            scrollToBottom();
+        }
+    }
+
+    async function sendMessage() {
+        var input = overlay.querySelector('.chat-input');
+        var content = input.value.trim();
+        if (!content) return;
+        if (currentMode === 'user' && !currentPeerId) return;
+        if (currentMode === 'author' && !currentAuthorId) return;
+        if (currentMode === 'group' && !currentGroupId) return;
+
+        input.value = '';
+        overlay.querySelector('.chat-send-btn').classList.remove('can-send');
+
+        var sentAt = new Date().toISOString();
+        var messagesEl = overlay.querySelector('.chat-messages');
+        var empty = messagesEl.querySelector('.chat-empty');
+        if (empty) empty.remove();
+
+        var msgEl = document.createElement('div');
+        msgEl.className = 'chat-msg msg-self';
+        msgEl.innerHTML = '<div class="chat-msg-bubble">' + escapeHtml(content) + '</div>';
+        messagesEl.appendChild(msgEl);
+        scrollToBottom();
+
+        try {
+            var url, body;
+            if (currentMode === 'group') {
+                url = '/web/api/group/message';
+                body = { group_id: currentGroupId, content: content, token: token };
+            } else if (currentMode === 'user') {
+                url = '/web/api/user/message';
+                body = { receiver_id: currentPeerId, content: content, token: token };
+            } else {
+                url = '/web/api/author/message';
+                body = { author_id: currentAuthorId, content: content, token: token };
+            }
+            var resp = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+            var result = await resp.json();
+            if (result && result.status === 'success') {
+                var cachedMessages = getRenderedMessages();
+                cachedMessages.push({
+                    id: result.id || Date.now(),
+                    is_self: true,
+                    content: content,
+                    time: sentAt
+                });
+                rememberRenderedMessages(cachedMessages);
+                invalidateConversationSummaries();
+                bindLongPress(msgEl, result.id || 0, true);
+                if (result.id && result.id > lastMessageId) {
+                    lastMessageId = result.id;
+                }
+            }
+        } catch (e) {
+            if (window.showToast) window.showToast('鍙戦€佸け璐?);
+        }
+
+        input.focus();
+    }
+
+    */
+
+    function appendRenderedMessage(messagesEl, msg) {
+        if (msg.time && shouldShowTime(lastRawTime, msg.time)) {
+            var divider = document.createElement('div');
+            divider.className = 'chat-time-divider';
+            divider.textContent = formatTime(msg.time);
+            messagesEl.appendChild(divider);
+        }
+        lastRawTime = msg.time;
+
+        var msgEl = document.createElement('div');
+        msgEl.className = 'chat-msg ' + (msg.is_self ? 'msg-self' : 'msg-other');
+
+        var avatarSrc, senderName;
+        if (currentMode === 'group' && !msg.is_self) {
+            avatarSrc = msg.sender_avatar ? getAvatarUrl(msg.sender_avatar) : '';
+            senderName = msg.sender_name || '';
+        } else {
+            avatarSrc = msg.is_self ? '' : getAvatarUrl(currentAvatarUrl);
+            senderName = '';
+        }
+
+        var avatarHtml = avatarSrc
+            ? '<img class="chat-msg-avatar" src="' + avatarSrc + '" referrerpolicy="no-referrer">'
+            : '';
+
+        var senderHtml = senderName
+            ? '<div class="chat-msg-sender">' + escapeHtml(senderName) + '</div>'
+            : '';
+
+        if (senderHtml) {
+            msgEl.innerHTML = avatarHtml + '<div class="chat-msg-body">' + senderHtml + renderMessageContent(msg.content) + '</div>';
+        } else {
+            msgEl.innerHTML = avatarHtml + renderMessageContent(msg.content);
+        }
+
+        if (!msg.is_self && currentMode === 'user' && currentPeerId) {
+            var avatarEl = msgEl.querySelector('.chat-msg-avatar');
+            if (avatarEl) {
+                avatarEl.style.cursor = 'pointer';
+                avatarEl.onclick = function (e) {
+                    e.stopPropagation();
+                    if (window.AuthorProfile && window.AuthorProfile.openUserProfile) {
+                        window.AuthorProfile.openUserProfile(currentPeerId, null);
+                    }
+                };
+            }
+        }
+
+        if (!msg.is_self && currentMode === 'group' && msg.sender_id) {
+            var avatarEl2 = msgEl.querySelector('.chat-msg-avatar');
+            if (avatarEl2) {
+                avatarEl2.style.cursor = 'pointer';
+                (function (sid) {
+                    avatarEl2.onclick = function (e) {
+                        e.stopPropagation();
+                        if (window.AuthorProfile && window.AuthorProfile.openUserProfile) {
+                            window.AuthorProfile.openUserProfile(sid, null);
+                        }
+                    };
+                })(msg.sender_id);
+            }
+        }
+
+        if (msg.id) {
+            bindLongPress(msgEl, msg.id, msg.is_self);
+            if (msg.id > lastMessageId) lastMessageId = msg.id;
+        }
+
+        messagesEl.appendChild(msgEl);
+    }
+
+    function renderMessages(messages) {
+        if (!overlay) return;
+        var messagesEl = overlay.querySelector('.chat-messages');
+        lastMessageId = 0;
+        lastRawTime = null;
+        messagesEl.innerHTML = '';
+
+        var normalized = pruneMessages(messages || []);
+        if (!normalized.length) {
+            overlay._chatMessages = [];
+            messagesEl.innerHTML = '<div class="chat-empty">No messages yet</div>';
+            setMessagesCache([]);
+            return;
+        }
+
+        normalized.forEach(function (msg) {
+            appendRenderedMessage(messagesEl, msg);
+        });
+        rememberRenderedMessages(normalized);
+        scrollToBottom();
+    }
+
+    async function loadMessages() {
+        if (!overlay) return;
+        var messagesEl = overlay.querySelector('.chat-messages');
+        var cached = peekMessagesCache();
+
+        if (cached) {
+            renderMessages(cached.data);
+        } else {
+            messagesEl.innerHTML = '<div class="chat-empty">Loading...</div>';
+        }
+
+        try {
+            var url;
+            if (currentMode === 'group') {
+                if (!currentGroupId) return;
+                url = '/web/api/group/messages?group_id=' + currentGroupId + '&token=' + encodeURIComponent(token);
+            } else if (currentMode === 'user') {
+                if (currentPeerId == null) return;
+                url = '/web/api/user/messages?peer_id=' + currentPeerId + '&token=' + encodeURIComponent(token);
+            } else {
+                if (!currentAuthorId) return;
+                url = '/web/api/author/messages?author_id=' + encodeURIComponent(currentAuthorId) + '&token=' + encodeURIComponent(token);
+            }
+
+            var resp = await fetch(url);
+            var messages = await resp.json();
+            renderMessages(messages || []);
+        } catch (e) {
+            if (!cached) {
+                messagesEl.innerHTML = '<div class="chat-empty">Load failed</div>';
+            }
+        }
+    }
+
+    function appendNewMessages(messages) {
+        if (!overlay) return;
+        var messagesEl = overlay.querySelector('.chat-messages');
+        var empty = messagesEl.querySelector('.chat-empty');
+        if (empty) empty.remove();
+
+        var merged = getRenderedMessages();
+        var changed = false;
+
+        messages.forEach(function (msg) {
+            if (msg.id && msg.id <= lastMessageId) return;
+            appendRenderedMessage(messagesEl, msg);
+            merged.push(msg);
+            changed = true;
+        });
+
+        if (changed) {
+            rememberRenderedMessages(merged);
+            invalidateConversationSummaries();
+            scrollToBottom();
+        }
+    }
+
+    async function sendMessage() {
+        var input = overlay.querySelector('.chat-input');
+        var content = input.value.trim();
+        if (!content) return;
+        if (currentMode === 'user' && !currentPeerId) return;
+        if (currentMode === 'author' && !currentAuthorId) return;
+        if (currentMode === 'group' && !currentGroupId) return;
+
+        input.value = '';
+        overlay.querySelector('.chat-send-btn').classList.remove('can-send');
+
+        var sentAt = new Date().toISOString();
+        var messagesEl = overlay.querySelector('.chat-messages');
+        var empty = messagesEl.querySelector('.chat-empty');
+        if (empty) empty.remove();
+
+        var msgEl = document.createElement('div');
+        msgEl.className = 'chat-msg msg-self';
+        msgEl.innerHTML = '<div class="chat-msg-bubble">' + escapeHtml(content) + '</div>';
+        messagesEl.appendChild(msgEl);
+        scrollToBottom();
+
+        try {
+            var url, body;
+            if (currentMode === 'group') {
+                url = '/web/api/group/message';
+                body = { group_id: currentGroupId, content: content, token: token };
+            } else if (currentMode === 'user') {
+                url = '/web/api/user/message';
+                body = { receiver_id: currentPeerId, content: content, token: token };
+            } else {
+                url = '/web/api/author/message';
+                body = { author_id: currentAuthorId, content: content, token: token };
+            }
+            var resp = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+            var result = await resp.json();
+            if (result && result.status === 'success') {
+                var cachedMessages = getRenderedMessages();
+                cachedMessages.push({
+                    id: result.id || Date.now(),
+                    is_self: true,
+                    content: content,
+                    time: sentAt
+                });
+                rememberRenderedMessages(cachedMessages);
+                invalidateConversationSummaries();
+                bindLongPress(msgEl, result.id || 0, true);
+                if (result.id && result.id > lastMessageId) {
+                    lastMessageId = result.id;
+                }
+            }
+        } catch (e) {
+            if (window.showToast) window.showToast('Send failed');
+        }
+
+        input.focus();
+    }
+
     // ========== Group Info Panel ==========
 
     function getOrCreateGroupInfoPanel() {
@@ -1149,6 +1587,125 @@
         groupInfoPanel.querySelector('.chat-gip-close').onclick = hideGroupInfoPanel;
         overlay.appendChild(groupInfoPanel);
         return groupInfoPanel;
+    }
+
+    function renderGroupInfoPanel(panel, groupId, info, members, currentUserId) {
+        info = info || {};
+        members = Array.isArray(members) ? members : [];
+
+        var memberList = panel.querySelector('.chat-gip-member-list');
+        var nameInput = panel.querySelector('.chat-gip-name-input');
+        var editBtn = panel.querySelector('.chat-gip-name-edit');
+        var leaveBtn = panel.querySelector('.chat-gip-leave-btn');
+        var isCreator = !!(currentUserId && info.creator_id == currentUserId);
+
+        nameInput.value = info.name || '';
+
+        if (isCreator) {
+            nameInput.removeAttribute('readonly');
+            editBtn.style.display = '';
+            editBtn.onclick = async function () {
+                var newName = nameInput.value.trim();
+                if (!newName || newName === (info.name || '')) return;
+                try {
+                    await fetch('/web/api/group/name', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ token: token, group_id: groupId, name: newName }),
+                    });
+                    info.name = newName;
+                    setGroupInfoCache(groupId, {
+                        info: info,
+                        members: members,
+                        currentUserId: currentUserId,
+                    });
+                    overlay.querySelector('.chat-title').textContent = newName;
+                    invalidateConversationSummaries();
+                    if (window.showToast) window.showToast('Group name updated');
+                } catch (e) {
+                    if (window.showToast) window.showToast('Rename failed');
+                }
+            };
+        } else {
+            nameInput.setAttribute('readonly', '');
+            editBtn.style.display = 'none';
+            editBtn.onclick = null;
+        }
+
+        memberList.innerHTML = '';
+        members.forEach(function (m) {
+            var el = document.createElement('div');
+            el.className = 'chat-member-item';
+            var avatarSrc = m.avatar_url ? getAvatarUrl(m.avatar_url) : '';
+            var roleTag = m.role === 'creator' ? '<span class="chat-member-role">缇や富</span>' : '';
+            var removeBtn = (isCreator && m.role !== 'creator')
+                ? '<button class="chat-member-remove-btn" data-uid="' + m.user_id + '">绉婚櫎</button>'
+                : '';
+
+            el.innerHTML = [
+                avatarSrc
+                    ? '<img class="chat-member-avatar" src="' + avatarSrc + '" referrerpolicy="no-referrer">'
+                    : '<span class="chat-member-avatar-ph">馃懁</span>',
+                '<span class="chat-member-name">' + escapeHtml(m.nickname) + '</span>',
+                roleTag,
+                removeBtn,
+            ].join('');
+
+            var rmBtn = el.querySelector('.chat-member-remove-btn');
+            if (rmBtn) {
+                rmBtn.onclick = async function (e) {
+                    e.stopPropagation();
+                    var uid = parseInt(rmBtn.dataset.uid, 10);
+                    try {
+                        await fetch('/web/api/group/member?group_id=' + groupId + '&user_id=' + uid + '&token=' + encodeURIComponent(token), { method: 'DELETE' });
+                        var nextMembers = members.filter(function (member) {
+                            return member.user_id !== uid;
+                        });
+                        setGroupInfoCache(groupId, {
+                            info: info,
+                            members: nextMembers,
+                            currentUserId: currentUserId,
+                        });
+                        invalidateConversationSummaries();
+                        renderGroupInfoPanel(panel, groupId, info, nextMembers, currentUserId);
+                        if (window.showToast) window.showToast('Member removed');
+                    } catch (err) {
+                        if (window.showToast) window.showToast('Action failed');
+                    }
+                };
+            }
+
+            el.onclick = function () {
+                if (window.AuthorProfile && window.AuthorProfile.openUserProfile) {
+                    window.AuthorProfile.openUserProfile(m.user_id, null);
+                }
+            };
+
+            memberList.appendChild(el);
+        });
+
+        panel.querySelector('.chat-gip-invite-btn').onclick = function () {
+            showInvitePanel(groupId, members);
+        };
+
+        if (isCreator) {
+            leaveBtn.style.display = 'none';
+            leaveBtn.onclick = null;
+        } else {
+            leaveBtn.style.display = '';
+            leaveBtn.onclick = async function () {
+                try {
+                    await fetch('/web/api/group/member?group_id=' + groupId + '&user_id=' + currentUserId + '&token=' + encodeURIComponent(token), { method: 'DELETE' });
+                    removeGroupInfoCache(groupId);
+                    invalidateConversationSummaries();
+                    hideGroupInfoPanel();
+                    close();
+                    if (window.showToast) window.showToast('Left group');
+                } catch (e) {
+                    if (window.showToast) window.showToast('Action failed');
+                }
+            };
+        }
     }
 
     async function showGroupInfoPanel(groupId) {
@@ -1210,7 +1767,7 @@
             members.forEach(function (m) {
                 var el = document.createElement('div');
                 el.className = 'chat-member-item';
-                var avatarSrc = m.avatar_url ? getMediaUrl(m.avatar_url) : '';
+                var avatarSrc = m.avatar_url ? getAvatarUrl(m.avatar_url) : '';
                 var roleTag = m.role === 'creator' ? '<span class="chat-member-role">群主</span>' : '';
                 var removeBtn = (isCreator && m.role !== 'creator')
                     ? '<button class="chat-member-remove-btn" data-uid="' + m.user_id + '">移除</button>'
@@ -1274,6 +1831,53 @@
         }
     }
 
+    async function showGroupInfoPanel(groupId) {
+        var panel = getOrCreateGroupInfoPanel();
+        var memberList = panel.querySelector('.chat-gip-member-list');
+        var cached = peekGroupInfoCache(groupId);
+
+        if (cached && cached.data) {
+            renderGroupInfoPanel(panel, groupId, cached.data.info, cached.data.members, cached.data.currentUserId);
+        } else {
+            memberList.innerHTML = '<div class="ms-loading">Loading...</div>';
+        }
+
+        requestAnimationFrame(function () {
+            panel.classList.add('panel-visible');
+        });
+
+        try {
+            var results = await Promise.all([
+                fetch('/web/api/group/info?group_id=' + groupId + '&token=' + encodeURIComponent(token)),
+                fetch('/web/api/group/members?group_id=' + groupId + '&token=' + encodeURIComponent(token)),
+                getCurrentUserProfile(),
+            ]);
+            var infoResp = results[0];
+            var membersResp = results[1];
+            var profile = results[2];
+
+            if (!infoResp.ok || !membersResp.ok) {
+                throw new Error('group info fetch failed');
+            }
+
+            var payloads = await Promise.all([infoResp.json(), membersResp.json()]);
+            var info = payloads[0] || {};
+            var members = payloads[1] || [];
+            var currentUserId = profile && profile.id != null ? profile.id : null;
+
+            setGroupInfoCache(groupId, {
+                info: info,
+                members: members,
+                currentUserId: currentUserId,
+            });
+            renderGroupInfoPanel(panel, groupId, info, members, currentUserId);
+        } catch (e) {
+            if (!cached) {
+                memberList.innerHTML = '<div class="ms-empty">Load failed</div>';
+            }
+        }
+    }
+
     function hideGroupInfoPanel() {
         if (groupInfoPanel) groupInfoPanel.classList.remove('panel-visible');
     }
@@ -1326,7 +1930,7 @@
             available.forEach(function (f) {
                 var el = document.createElement('div');
                 el.className = 'chat-invite-item';
-                var avatarSrc = f.avatar_url ? getMediaUrl(f.avatar_url) : '';
+                var avatarSrc = f.avatar_url ? getAvatarUrl(f.avatar_url) : '';
                 el.innerHTML = [
                     '<input type="checkbox" class="chat-invite-check" data-uid="' + f.id + '">',
                     avatarSrc
@@ -1360,6 +1964,8 @@
                             body: JSON.stringify({ token: token, group_id: groupId, user_id: parseInt(checks[i].dataset.uid) }),
                         });
                     }
+                    removeGroupInfoCache(groupId);
+                    invalidateConversationSummaries();
                     hideInvitePanel();
                     showGroupInfoPanel(groupId);
                     if (window.showToast) window.showToast('邀请成功');

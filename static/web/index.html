@@ -12,7 +12,7 @@
       rel="icon"
       href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📕</text></svg>"
     />
-    <link rel="stylesheet" href="/web/static/style.css" />
+    <link rel="stylesheet" href="/web/static/style.css?v=20260519f" />
   </head>
   <body>
     <div class="app-container">
@@ -323,7 +323,6 @@
           <span id="noteAuthorName" class="note-author-name"></span>
         </div>
         <div class="note-detail-actions">
-          <button id="noteOriginalLink" class="note-original-btn" title="查看原帖">🔗</button>
           <button class="note-follow-btn">关注</button>
           <button id="noteShareBtn" class="note-share-btn"></button>
         </div>
@@ -335,7 +334,10 @@
           </div>
           <div id="noteMediaCounter" class="note-media-counter">1/1</div>
         </div>
-        <div id="noteMediaDots" class="note-media-dots"></div>
+        <div class="note-media-toolbar">
+          <button id="noteOriginalLink" class="note-original-btn" title="查看原帖">🔗</button>
+          <div id="noteMediaDots" class="note-media-dots"></div>
+        </div>
         <div class="note-text-content">
           <h2 id="noteDetailTitle" class="note-title"></h2>
           <p id="noteDetailDesc" class="note-desc"></p>
@@ -437,15 +439,17 @@
 
     <script src="/web/static/lib/echarts.min.js"></script>
     <script src="/web/static/lib/china.js"></script>
-    <script src="/web/static/utils/swipe.js"></script>
+    <script src="/web/static/utils/swipe.js?v=20260519a"></script>
+    <script src="/web/static/utils/swipeClose.js"></script>
     <script src="/web/static/utils/svg.js"></script>
     <script src="/web/static/utils/tools.js"></script>
+    <script src="/web/static/utils/uiCache.js?v=20260519c"></script>
     <script src="/web/static/componentUtils/toast/toast.js"></script>
     <script src="/web/static/componentUtils/tips/tips.js"></script>
-    <script src="/web/static/componentUtils/authorProfile/authorProfile.js"></script>
-    <script src="/web/static/componentUtils/chatUI/chatUI.js"></script>
-    <script src="/web/static/componentUtils/messageStation/messageStation.js"></script>
-    <script src="/web/static/componentUtils/userBrowser/userBrowser.js"></script>
-    <script src="/web/static/script.js"></script>
+    <script src="/web/static/componentUtils/authorProfile/authorProfile.js?v=20260519c"></script>
+    <script src="/web/static/componentUtils/chatUI/chatUI.js?v=20260519c"></script>
+    <script src="/web/static/componentUtils/messageStation/messageStation.js?v=20260519e"></script>
+    <script src="/web/static/componentUtils/userBrowser/userBrowser.js?v=20260519c"></script>
+    <script src="/web/static/script.js?v=20260519f"></script>
   </body>
 </html>

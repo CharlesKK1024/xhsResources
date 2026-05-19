@@ -953,7 +953,7 @@ class XHSWebUI {
         const allImages = [];
         items.forEach(item => {
             if (item.data && item.data.images) {
-                allImages.push(...item.data.images.map(img => img.url));
+                allImages.push(...item.data.images.map(img => this.getPreferredMediaItemUrl(img)).filter(Boolean));
             }
         });
 
@@ -1000,7 +1000,7 @@ class XHSWebUI {
         const _detHeader = viewer.querySelector('.note-detail-header');
         const _detFooter = viewer.querySelector('.note-detail-footer');
         const _detText = viewer.querySelector('.note-text-content');
-        const _detDots = this.noteMediaDots;
+        const _detDots = viewer.querySelector('.note-media-toolbar') || this.noteMediaDots;
         const _detCounter = viewer.querySelector('.note-media-counter');
         const _animEls = [_detHeader, _detFooter, _detText, _detDots, _detCounter].filter(Boolean);
 
@@ -1018,11 +1018,11 @@ class XHSWebUI {
         // 使用作者固定头像（该作者第一个作品的封面），缓存避免重复请求
         const authorId = note.authorId || '';
         if (authorId && this._authorAvatarCache[authorId]) {
-            this.noteAvatar.src = this.getMediaUrl(this._authorAvatarCache[authorId]);
+            this.noteAvatar.src = this.getAvatarUrl(this._authorAvatarCache[authorId]);
             this.noteAvatar.setAttribute('referrerpolicy', 'no-referrer');
         } else {
             // 临时用当前封面占位
-            const tmpCover = (isMobile && note.raw_cover) ? note.raw_cover : note.cover;
+            const tmpCover = this.getPreferredNoteCoverUrl(note);
             this.noteAvatar.src = this.getMediaUrl(tmpCover);
             this.noteAvatar.setAttribute('referrerpolicy', 'no-referrer');
             // 异步获取作者第一个作品的封面
@@ -1032,7 +1032,7 @@ class XHSWebUI {
                     .then(data => {
                         if (data && data.cover) {
                             this._authorAvatarCache[authorId] = data.cover;
-                            this.noteAvatar.src = this.getMediaUrl(data.cover);
+                            this.noteAvatar.src = this.getAvatarUrl(data.cover);
                         }
                     })
                     .catch(() => {});
@@ -1105,15 +1105,13 @@ class XHSWebUI {
             mediaItems = note.videos;
         }
 
-        this.noteMediaList = mediaItems.map(item => {
-            return (isMobile && item.raw_url) ? item.raw_url : item.url;
-        });
+        this.noteMediaList = mediaItems.map(item => this.getPreferredMediaItemUrl(item));
         this.noteMediaIndex = 0;
         this.noteMediaWrapper.style.transition = 'none';
         this.noteMediaWrapper.style.transform = 'translateX(0%)';
 
         mediaItems.forEach((item, i) => {
-            const url = (isMobile && item.raw_url) ? item.raw_url : item.url;
+            const url = this.getPreferredMediaItemUrl(item);
             const container = document.createElement('div');
             container.className = 'note-media-item';
             
@@ -2048,7 +2046,7 @@ class XHSWebUI {
         document.getElementById('commentCount').textContent = this.formatNum(data.commentCount);
 
         const cover = document.getElementById('coverImg');
-        const coverUrl = this.getMediaUrl(data.cover);
+        const coverUrl = this.getMediaUrl(this.getPreferredNoteCoverUrl(data));
         
         // 强制设置 no-referrer 以绕开 cpolar
         cover.setAttribute('referrerpolicy', 'no-referrer');
@@ -2057,9 +2055,9 @@ class XHSWebUI {
         // 封面加载失败时的回退逻辑
         cover.onerror = () => {
             if (data.images && data.images.length > 0) {
-                cover.src = this.getMediaUrl(data.images[0].url);
+                cover.src = this.getMediaUrl(this.getPreferredMediaItemUrl(data.images[0]));
             } else if (data.videos && data.videos.length > 0) {
-                cover.src = this.getMediaUrl(data.videos[0].url);
+                cover.src = this.getMediaUrl(this.getPreferredMediaItemUrl(data.videos[0]));
             } else {
                 cover.src = this.getPlaceholder();
             }
@@ -2105,20 +2103,13 @@ class XHSWebUI {
         
         const media = data.images.length > 0 ? data.images : data.videos;
         if (!media.length) return;
-
         const isMobile = this.isIOS() || this.isAndroid();
 
         media.forEach((item, i) => {
             const div = document.createElement('div');
             div.className = 'preview-item';
-            
-            // 如果是移动端，优先使用原始 URL (item.raw_url 或 item.url 只要不是 /web/cache 开头的)
-            let displayUrl = item.url;
-            if (isMobile && item.raw_url) {
-                displayUrl = item.raw_url;
-            }
 
-            const url = this.getMediaUrl(displayUrl);
+            const url = this.getMediaUrl(this.getPreferredMediaItemUrl(item));
             
             // 1. 手动创建 img 元素，确保兼容性并强制绕开 cpolar
             const img = document.createElement('img');
@@ -2152,19 +2143,19 @@ class XHSWebUI {
             const setCoverBtn = div.querySelector('.set-cover-btn');
             setCoverBtn.onclick = (e) => {
                 e.stopPropagation();
-                this.setAsCover(item.url);
+                this.setAsCover(item);
             };
             
             // 删除媒体逻辑
             const deleteBtn = div.querySelector('.delete-media-btn');
             deleteBtn.onclick = (e) => {
                 e.stopPropagation();
-                this.deleteMedia(item.url);
+                this.deleteMedia(item);
             };
 
             div.onclick = () => {
                 if (!this.isEditMode) {
-                    const allUrls = media.map(m => m.url);
+                    const allUrls = media.map(m => this.getPreferredMediaItemUrl(m));
                     this.openViewer(allUrls, i);
                 }
             };
@@ -2174,33 +2165,37 @@ class XHSWebUI {
         this.downloadAllBtn.style.display = data.images.length > 0 ? 'block' : 'none';
     }
 
-    async setAsCover(url) {
+    async setAsCover(item) {
         if (!this.currentNote) return;
-        this.currentNote.cover = url;
+        const cacheUrl = item && item.url ? item.url : '';
+        this.currentNote.cover = cacheUrl;
+        this.currentNote.raw_cover = this.getPreferredMediaItemUrl(item);
         await this.updateNoteData();
         this.displayResult(this.currentNote);
     }
 
-    async deleteMedia(url) {
+    async deleteMedia(item) {
         if (!this.currentNote) return; 
+        const cacheUrl = item && item.url ? item.url : '';
         try {
             // 1. 先尝试从后端物理删除文件
-            await fetch(`/web/api/cache?url=${encodeURIComponent(url)}`, { method: 'DELETE' });
+            await fetch(`/web/api/cache?url=${encodeURIComponent(cacheUrl)}`, { method: 'DELETE' });
 
             // 2. 从内存数据中精准移除
             if (this.currentNote.images) {
-                this.currentNote.images = this.currentNote.images.filter(img => img.url !== url);
+                this.currentNote.images = this.currentNote.images.filter(img => img.url !== cacheUrl);
             }
             if (this.currentNote.videos) {
-                this.currentNote.videos = this.currentNote.videos.filter(vid => vid.url !== url);
+                this.currentNote.videos = this.currentNote.videos.filter(vid => vid.url !== cacheUrl);
             }
             
             // 3. 处理封面变动
             let coverChanged = false;
-            if (this.currentNote.cover === url) {
+            if (this.currentNote.cover === cacheUrl) {
                 const nextMedia = (this.currentNote.images && this.currentNote.images[0]) || 
                                 (this.currentNote.videos && this.currentNote.videos[0]);
                 this.currentNote.cover = nextMedia ? nextMedia.url : '';
+                this.currentNote.raw_cover = nextMedia ? this.getPreferredMediaItemUrl(nextMedia) : '';
                 coverChanged = true;
             }
             
@@ -2210,7 +2205,7 @@ class XHSWebUI {
             // 5. 局部刷新 UI，消除闪烁
             if (coverChanged) {
                 const coverImg = document.getElementById('coverImg');
-                if (coverImg) coverImg.src = this.getMediaUrl(this.currentNote.cover);
+                if (coverImg) coverImg.src = this.getMediaUrl(this.getPreferredNoteCoverUrl(this.currentNote));
             }
             this.renderPreviewList(this.currentNote);
             
@@ -2741,7 +2736,7 @@ class XHSWebUI {
             items.forEach(item => {
                 const note = item.data;
                 if (!note) return;
-                const coverUrl = this.getMediaUrl(note.cover || note.raw_cover || '');
+                const coverUrl = this.getMediaUrl(this.getPreferredNoteCoverUrl(note));
                 const div = document.createElement('div');
                 div.className = 'tag-popup-item';
                 div.innerHTML = `
@@ -2831,7 +2826,7 @@ class XHSWebUI {
                 const avatarImg = header.querySelector('.author-avatar');
                 if (authorId) {
                     if (this._authorAvatarCache && this._authorAvatarCache[authorId]) {
-                        avatarImg.src = this.getMediaUrl(this._authorAvatarCache[authorId]);
+                        avatarImg.src = this.getAvatarUrl(this._authorAvatarCache[authorId]);
                     } else {
                         fetch(`/web/api/author/avatar?author_id=${encodeURIComponent(authorId)}&token=${encodeURIComponent(this.token)}`)
                             .then(r => r.json())
@@ -2839,7 +2834,7 @@ class XHSWebUI {
                                 if (data && data.cover) {
                                     if (!this._authorAvatarCache) this._authorAvatarCache = {};
                                     this._authorAvatarCache[authorId] = data.cover;
-                                    avatarImg.src = this.getMediaUrl(data.cover);
+                                    avatarImg.src = this.getAvatarUrl(data.cover);
                                 }
                             })
                             .catch(() => {});
@@ -2861,7 +2856,7 @@ class XHSWebUI {
                     const allImages = [];
                     authorItems.forEach(item => {
                         if (item.data && item.data.images) {
-                            allImages.push(...item.data.images.map(img => img.url));
+                            allImages.push(...item.data.images.map(img => this.getPreferredMediaItemUrl(img)).filter(Boolean));
                         }
                     });
                     this.openViewer(allImages);
@@ -2900,7 +2895,7 @@ class XHSWebUI {
                     card.className = 'list-item';
                     card.innerHTML = `
                         <div class="item-cover">
-                            <img src="${this.getMediaUrl(note.cover)}" loading="lazy" referrerpolicy="no-referrer">
+                            <img src="${this.getMediaUrl(this.getPreferredNoteCoverUrl(note))}" loading="lazy" referrerpolicy="no-referrer">
                             <button class="delete-item-btn" title="删除记录">✕</button>
                             ${item.is_starred ? '<div class="item-star-badge">❤️</div>' : ''}
                         </div>
@@ -3384,6 +3379,7 @@ class XHSWebUI {
 
     getMediaUrl(url) {
         if (!url) return this.getPlaceholder();
+        return this.normalizeMediaUrl(url);
 
         if (typeof url === 'string' && url.includes('xhscdn.com') && url.startsWith('http://')) {
             url = `https://${url.slice('http://'.length)}`;
@@ -3406,6 +3402,7 @@ class XHSWebUI {
 
     getVideoUrl(url) {
         if (!url) return '';
+        return this.normalizeMediaUrl(url);
 
         if (typeof url === 'string' && url.includes('xhscdn.com') && url.startsWith('http://')) {
             url = `https://${url.slice('http://'.length)}`;
@@ -3414,6 +3411,29 @@ class XHSWebUI {
         // Live 视频不走图片代理；本地缓存直接用缓存路径，远程地址直接直连
         if (url.startsWith('/web/cache')) return url;
         return url;
+    }
+
+    normalizeMediaUrl(url) {
+        if (!url || typeof url !== 'string') return url || '';
+        if (url.includes('xhscdn.com') && url.startsWith('http://')) {
+            return `https://${url.slice('http://'.length)}`;
+        }
+        return url;
+    }
+
+    getAvatarUrl(url) {
+        if (!url) return this.getPlaceholder();
+        return this.normalizeMediaUrl(url);
+    }
+
+    getPreferredNoteCoverUrl(note) {
+        if (!note) return '';
+        return this.normalizeMediaUrl(note.raw_cover || note.cover || '');
+    }
+
+    getPreferredMediaItemUrl(item) {
+        if (!item) return '';
+        return this.normalizeMediaUrl(item.raw_url || item.url || '');
     }
 
     _fallbackCopy(text) {
@@ -3439,8 +3459,8 @@ class XHSWebUI {
     async copyLinks() {
         if (!this.currentNote) return;
         const links = [];
-        if (this.currentNote.images) links.push(...this.currentNote.images.map(i => i.url));
-        if (this.currentNote.videos) links.push(...this.currentNote.videos.map(v => v.url));
+        if (this.currentNote.images) links.push(...this.currentNote.images.map(i => this.getPreferredMediaItemUrl(i)).filter(Boolean));
+        if (this.currentNote.videos) links.push(...this.currentNote.videos.map(v => this.getPreferredMediaItemUrl(v)).filter(Boolean));
         
         try {
             await navigator.clipboard.writeText(links.join('\n'));
@@ -3471,7 +3491,7 @@ class XHSWebUI {
         this.currentNote.images.forEach((img, i) => {
             setTimeout(() => {
                 const a = document.createElement('a');
-                a.href = this.getMediaUrl(img.url);
+                a.href = this.getPreferredMediaItemUrl(img);
                 a.download = `xhs_${this.currentNote.id}_${i+1}.png`;
                 a.click();
             }, i * 300);
@@ -3676,7 +3696,7 @@ class XHSWebUI {
 
                 const coverImg = document.createElement('img');
                 coverImg.className = 'tag-popup-cover';
-                coverImg.src = this.getMediaUrl(note.cover);
+                coverImg.src = this.getMediaUrl(this.getPreferredNoteCoverUrl(note));
                 coverImg.loading = 'lazy';
                 coverImg.referrerPolicy = 'no-referrer';
                 el.appendChild(coverImg);

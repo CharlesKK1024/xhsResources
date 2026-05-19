@@ -7,6 +7,10 @@
     var currentAuthorId = null;
     var searchTimer = null;
     var initialized = false;
+    var USER_BROWSER_CACHE_TTLS = {
+        search: 60000,
+        history: 60000,
+    };
 
     function init() {
         container = document.getElementById('userBrowserContainer');
@@ -86,11 +90,22 @@
 
     function getMediaUrl(url) {
         if (!url) return '';
-        if (typeof url === 'string' && url.startsWith('/web/cache')) return url;
         if (currentApp && currentApp.getMediaUrl) return currentApp.getMediaUrl(url);
-        var isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-        if (isMobile) return url;
-        return '/web/api/proxy?url=' + encodeURIComponent(url);
+        if (typeof url === 'string' && url.includes('xhscdn.com') && url.startsWith('http://')) {
+            return 'https://' + url.slice('http://'.length);
+        }
+        return url;
+    }
+
+    function getAvatarUrl(url) {
+        if (!url) return '';
+        if (currentApp && currentApp.getAvatarUrl) return currentApp.getAvatarUrl(url);
+        return getMediaUrl(url);
+    }
+
+    function getNoteCoverUrl(note) {
+        if (!note) return '';
+        return getMediaUrl(note.raw_cover || note.cover || '');
     }
 
     function formatNum(n) {
@@ -103,6 +118,23 @@
 
     function getToken() {
         return (currentApp && currentApp.token) || localStorage.getItem('xhs_token') || '';
+    }
+
+    function getCacheApi() {
+        return window.XHSUICache || null;
+    }
+
+    function getCacheScope() {
+        var token = getToken();
+        return token ? token.slice(-16) : 'guest';
+    }
+
+    function getSearchCacheKey(query) {
+        return 'userBrowser:' + getCacheScope() + ':search:' + query.toLowerCase();
+    }
+
+    function getHistoryCacheKey(userId) {
+        return 'userBrowser:' + getCacheScope() + ':history:' + userId;
     }
 
     async function checkFollowStatus(userId) {
@@ -158,7 +190,7 @@
             users.forEach(function (user) {
                 var item = document.createElement('div');
                 item.className = 'ub-user-item';
-                var avatarSrc = user.avatar_url ? getMediaUrl(user.avatar_url) : '';
+                var avatarSrc = user.avatar_url ? getAvatarUrl(user.avatar_url) : '';
                 item.innerHTML = [
                     '<div class="ub-user-avatar-wrap">',
                     avatarSrc ? '<img class="ub-user-avatar" src="' + avatarSrc + '" referrerpolicy="no-referrer">' : '<span class="ub-user-avatar-placeholder">👤</span>',
@@ -209,7 +241,7 @@
         switchView('collection');
 
         var card = container.querySelector('.ub-user-card');
-        var avatarSrc = user.avatar_url ? getMediaUrl(user.avatar_url) : '';
+        var avatarSrc = user.avatar_url ? getAvatarUrl(user.avatar_url) : '';
         card.innerHTML = [
             '<div class="ub-target-avatar-wrap">',
             avatarSrc ? '<img class="ub-target-avatar" src="' + avatarSrc + '" referrerpolicy="no-referrer">' : '<span class="ub-target-avatar-placeholder">👤</span>',
@@ -271,6 +303,334 @@
         }
     }
 
+    /* function renderSearchUsers(results, users) {
+        if (!users || !users.length) {
+            results.innerHTML = '<div class="ub-empty">鏈壘鍒扮敤鎴?/div>';
+            return;
+        }
+
+        results.innerHTML = '';
+        users.forEach(function (user) {
+            var item = document.createElement('div');
+            item.className = 'ub-user-item';
+            var avatarSrc = user.avatar_url ? getAvatarUrl(user.avatar_url) : '';
+            item.innerHTML = [
+                '<div class="ub-user-avatar-wrap">',
+                avatarSrc ? '<img class="ub-user-avatar" src="' + avatarSrc + '" referrerpolicy="no-referrer">' : '<span class="ub-user-avatar-placeholder">馃懁</span>',
+                '</div>',
+                '<div class="ub-user-info">',
+                '  <span class="ub-user-name">' + escapeHtml(user.nickname) + '</span>',
+                '  <span class="ub-user-count">' + user.work_count + ' 涓綔鍝?/span>',
+                '</div>',
+                '<button class="ub-follow-btn" data-following="false">鍏虫敞</button>',
+                '<span class="ub-user-arrow">鈥?/span>',
+            ].join('');
+
+            var followBtn = item.querySelector('.ub-follow-btn');
+            followBtn.onclick = function (e) {
+                e.stopPropagation();
+                toggleFollow(user.id, followBtn);
+            };
+            checkFollowStatus(user.id).then(function (status) {
+                if (status.is_following) {
+                    followBtn.dataset.following = 'true';
+                    followBtn.textContent = '宸插叧娉?';
+                    followBtn.classList.add('ub-following');
+                }
+            });
+
+            var avatarWrap = item.querySelector('.ub-user-avatar-wrap');
+            avatarWrap.style.cursor = 'pointer';
+            avatarWrap.onclick = function (e) {
+                e.stopPropagation();
+                if (window.AuthorProfile && window.AuthorProfile.openUserProfile) {
+                    window.AuthorProfile.openUserProfile(user.id, null);
+                }
+            };
+
+            item.onclick = function () {
+                openUserCollection(user);
+            };
+            results.appendChild(item);
+        });
+    }
+
+    async function doSearch(query) {
+        var results = container.querySelector('.ub-search-results');
+        if (!query) {
+            results.innerHTML = '<div class="ub-empty">杈撳叆鏄电О寮€濮嬫悳绱?/div>';
+            return;
+        }
+
+        var cache = getCacheApi();
+        var cacheKey = getSearchCacheKey(query);
+        var cached = cache ? cache.peek(cacheKey, USER_BROWSER_CACHE_TTLS.search) : null;
+        if (cached) {
+            renderSearchUsers(results, cached.data);
+        } else {
+            results.innerHTML = '<div class="ub-loading">鎼滅储涓?..</div>';
+        }
+
+        try {
+            var resp = await fetch('/web/api/user/search?q=' + encodeURIComponent(query) + '&token=' + encodeURIComponent(getToken()));
+            if (!resp.ok) throw new Error('search failed');
+            var users = await resp.json();
+            if (cache) cache.set(cacheKey, users || []);
+            renderSearchUsers(results, users || []);
+        } catch (e) {
+            if (!cached) {
+                results.innerHTML = '<div class="ub-empty">鎼滅储澶辫触</div>';
+            }
+        }
+    }
+
+    async function openUserCollection(user) {
+        currentTargetUser = user;
+        container.querySelector('.ub-nav-title').textContent = user.nickname + ' 鐨勪綔鍝侀泦';
+        switchView('collection');
+
+        var card = container.querySelector('.ub-user-card');
+        var avatarSrc = user.avatar_url ? getAvatarUrl(user.avatar_url) : '';
+        card.innerHTML = [
+            '<div class="ub-target-avatar-wrap">',
+            avatarSrc ? '<img class="ub-target-avatar" src="' + avatarSrc + '" referrerpolicy="no-referrer">' : '<span class="ub-target-avatar-placeholder">馃懁</span>',
+            '</div>',
+            '<div class="ub-target-info">',
+            '  <div class="ub-target-name">' + escapeHtml(user.nickname) + '</div>',
+            '  <div class="ub-target-count">鍏?' + user.work_count + ' 涓綔鍝?/div>',
+            '</div>',
+            '<div class="ub-card-actions">',
+            '  <button class="ub-follow-btn" data-following="false">鍏虫敞</button>',
+            '  <button class="ub-chat-btn">鍙戠淇?/button>',
+            '</div>',
+        ].join('');
+
+        var followBtn = card.querySelector('.ub-follow-btn');
+        checkFollowStatus(user.id).then(function (status) {
+            if (status.is_following) {
+                followBtn.dataset.following = 'true';
+                followBtn.textContent = '宸插叧娉?';
+                followBtn.classList.add('ub-following');
+            }
+        });
+        followBtn.onclick = function (e) {
+            e.stopPropagation();
+            toggleFollow(user.id, followBtn);
+        };
+
+        card.querySelector('.ub-chat-btn').onclick = function (e) {
+            e.stopPropagation();
+            if (window.ChatUI && window.ChatUI.openUserChat) {
+                window.ChatUI.openUserChat(user.id, user.nickname, user.avatar_url);
+            }
+        };
+
+        var authorList = container.querySelector('.ub-author-list');
+        var importAllBtn = container.querySelector('.ub-import-all-btn');
+        importAllBtn.onclick = function () { importAll(); };
+        importAllBtn.style.display = '';
+
+        var cache = getCacheApi();
+        var cacheKey = getHistoryCacheKey(user.id);
+        var cached = cache ? cache.peek(cacheKey, USER_BROWSER_CACHE_TTLS.history) : null;
+        if (cached) {
+            if (cached.data && cached.data.length) {
+                renderAuthorList(authorList, cached.data);
+            } else {
+                authorList.innerHTML = '<div class="ub-empty">璇ョ敤鎴锋病鏈変綔鍝?/div>';
+            }
+        } else {
+            authorList.innerHTML = '<div class="ub-loading">鍔犺浇涓?..</div>';
+        }
+
+        try {
+            var resp = await fetch('/web/api/user/' + user.id + '/history?token=' + encodeURIComponent(getToken()));
+            if (resp.status === 403) {
+                importAllBtn.style.display = 'none';
+                authorList.innerHTML = '<div class="ub-empty ub-mutual-hint">馃敀 鐩镐簰鍏虫敞鍚庡彲浠ユ煡鐪嬪鏂圭殑鍏歌棌浣滃搧闆?/div>';
+                return;
+            }
+            if (!resp.ok) throw new Error('fetch failed');
+            var items = await resp.json();
+            if (cache) cache.set(cacheKey, items || [], { persist: false, maxPersistBytes: 200 * 1024 });
+            if (!items.length) {
+                authorList.innerHTML = '<div class="ub-empty">璇ョ敤鎴锋病鏈変綔鍝?/div>';
+                return;
+            }
+            renderAuthorList(authorList, items);
+        } catch (e) {
+            if (!cached) {
+                importAllBtn.style.display = 'none';
+                authorList.innerHTML = '<div class="ub-empty ub-mutual-hint">馃敀 鐩镐簰鍏虫敞鍚庡彲浠ユ煡鐪嬪鏂圭殑鍏歌棌浣滃搧闆?/div>';
+            }
+        }
+    }
+
+    */
+
+    function renderSearchUsers(results, users) {
+        if (!users || !users.length) {
+            results.innerHTML = '<div class="ub-empty">No users found</div>';
+            return;
+        }
+
+        results.innerHTML = '';
+        users.forEach(function (user) {
+            var item = document.createElement('div');
+            item.className = 'ub-user-item';
+            var avatarSrc = user.avatar_url ? getAvatarUrl(user.avatar_url) : '';
+            item.innerHTML = [
+                '<div class="ub-user-avatar-wrap">',
+                avatarSrc ? '<img class="ub-user-avatar" src="' + avatarSrc + '" referrerpolicy="no-referrer">' : '<span class="ub-user-avatar-placeholder">U</span>',
+                '</div>',
+                '<div class="ub-user-info">',
+                '  <span class="ub-user-name">' + escapeHtml(user.nickname) + '</span>',
+                '  <span class="ub-user-count">' + user.work_count + ' posts</span>',
+                '</div>',
+                '<button class="ub-follow-btn" data-following="false">Follow</button>',
+                '<span class="ub-user-arrow">></span>',
+            ].join('');
+
+            var followBtn = item.querySelector('.ub-follow-btn');
+            followBtn.onclick = function (e) {
+                e.stopPropagation();
+                toggleFollow(user.id, followBtn);
+            };
+            checkFollowStatus(user.id).then(function (status) {
+                if (status.is_following) {
+                    followBtn.dataset.following = 'true';
+                    followBtn.textContent = 'Following';
+                    followBtn.classList.add('ub-following');
+                }
+            });
+
+            var avatarWrap = item.querySelector('.ub-user-avatar-wrap');
+            avatarWrap.style.cursor = 'pointer';
+            avatarWrap.onclick = function (e) {
+                e.stopPropagation();
+                if (window.AuthorProfile && window.AuthorProfile.openUserProfile) {
+                    window.AuthorProfile.openUserProfile(user.id, null);
+                }
+            };
+
+            item.onclick = function () {
+                openUserCollection(user);
+            };
+            results.appendChild(item);
+        });
+    }
+
+    async function doSearch(query) {
+        var results = container.querySelector('.ub-search-results');
+        if (!query) {
+            results.innerHTML = '<div class="ub-empty">Type a nickname to search</div>';
+            return;
+        }
+
+        var cache = getCacheApi();
+        var cacheKey = getSearchCacheKey(query);
+        var cached = cache ? cache.peek(cacheKey, USER_BROWSER_CACHE_TTLS.search) : null;
+        if (cached) {
+            renderSearchUsers(results, cached.data);
+        } else {
+            results.innerHTML = '<div class="ub-loading">Searching...</div>';
+        }
+
+        try {
+            var resp = await fetch('/web/api/user/search?q=' + encodeURIComponent(query) + '&token=' + encodeURIComponent(getToken()));
+            if (!resp.ok) throw new Error('search failed');
+            var users = await resp.json();
+            if (cache) cache.set(cacheKey, users || []);
+            renderSearchUsers(results, users || []);
+        } catch (e) {
+            if (!cached) {
+                results.innerHTML = '<div class="ub-empty">Search failed</div>';
+            }
+        }
+    }
+
+    async function openUserCollection(user) {
+        currentTargetUser = user;
+        container.querySelector('.ub-nav-title').textContent = user.nickname + ' works';
+        switchView('collection');
+
+        var card = container.querySelector('.ub-user-card');
+        var avatarSrc = user.avatar_url ? getAvatarUrl(user.avatar_url) : '';
+        card.innerHTML = [
+            '<div class="ub-target-avatar-wrap">',
+            avatarSrc ? '<img class="ub-target-avatar" src="' + avatarSrc + '" referrerpolicy="no-referrer">' : '<span class="ub-target-avatar-placeholder">U</span>',
+            '</div>',
+            '<div class="ub-target-info">',
+            '  <div class="ub-target-name">' + escapeHtml(user.nickname) + '</div>',
+            '  <div class="ub-target-count">Total ' + user.work_count + ' posts</div>',
+            '</div>',
+            '<div class="ub-card-actions">',
+            '  <button class="ub-follow-btn" data-following="false">Follow</button>',
+            '  <button class="ub-chat-btn">Chat</button>',
+            '</div>',
+        ].join('');
+
+        var followBtn = card.querySelector('.ub-follow-btn');
+        checkFollowStatus(user.id).then(function (status) {
+            if (status.is_following) {
+                followBtn.dataset.following = 'true';
+                followBtn.textContent = 'Following';
+                followBtn.classList.add('ub-following');
+            }
+        });
+        followBtn.onclick = function (e) {
+            e.stopPropagation();
+            toggleFollow(user.id, followBtn);
+        };
+
+        card.querySelector('.ub-chat-btn').onclick = function (e) {
+            e.stopPropagation();
+            if (window.ChatUI && window.ChatUI.openUserChat) {
+                window.ChatUI.openUserChat(user.id, user.nickname, user.avatar_url);
+            }
+        };
+
+        var authorList = container.querySelector('.ub-author-list');
+        var importAllBtn = container.querySelector('.ub-import-all-btn');
+        importAllBtn.onclick = function () { importAll(); };
+        importAllBtn.style.display = '';
+
+        var cache = getCacheApi();
+        var cacheKey = getHistoryCacheKey(user.id);
+        var cached = cache ? cache.peek(cacheKey, USER_BROWSER_CACHE_TTLS.history) : null;
+        if (cached) {
+            if (cached.data && cached.data.length) {
+                renderAuthorList(authorList, cached.data);
+            } else {
+                authorList.innerHTML = '<div class="ub-empty">No works yet</div>';
+            }
+        } else {
+            authorList.innerHTML = '<div class="ub-loading">Loading...</div>';
+        }
+
+        try {
+            var resp = await fetch('/web/api/user/' + user.id + '/history?token=' + encodeURIComponent(getToken()));
+            if (resp.status === 403) {
+                importAllBtn.style.display = 'none';
+                authorList.innerHTML = '<div class="ub-empty ub-mutual-hint">Mutual follow required to view works</div>';
+                return;
+            }
+            if (!resp.ok) throw new Error('fetch failed');
+            var items = await resp.json();
+            if (cache) cache.set(cacheKey, items || [], { persist: false, maxPersistBytes: 200 * 1024 });
+            if (!items.length) {
+                authorList.innerHTML = '<div class="ub-empty">No works yet</div>';
+                return;
+            }
+            renderAuthorList(authorList, items);
+        } catch (e) {
+            if (!cached) {
+                importAllBtn.style.display = 'none';
+                authorList.innerHTML = '<div class="ub-empty ub-mutual-hint">Mutual follow required to view works</div>';
+            }
+        }
+    }
+
     function renderAuthorList(listContainer, items) {
         var groups = {};
         var allNoteIds = [];
@@ -300,7 +660,7 @@
             for (var i = 0; i < group.works.length; i++) {
                 var d = group.works[i].data;
                 if (d && (d.cover || d.raw_cover)) {
-                    cover = getMediaUrl(d.cover || d.raw_cover);
+                    cover = getNoteCoverUrl(d);
                     break;
                 }
             }
@@ -351,7 +711,7 @@
             if (!note) return;
             var card = document.createElement('div');
             card.className = 'ub-work-card';
-            var coverSrc = getMediaUrl(note.cover || note.raw_cover || '');
+            var coverSrc = getNoteCoverUrl(note);
             var isVideo = note.type === '视频' || (note.videos && note.videos.length > 0);
 
             card.innerHTML = [

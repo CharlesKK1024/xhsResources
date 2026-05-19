@@ -9,6 +9,10 @@
     let tagsScrollTimer = null;
     let currentProfileMode = 'author';
     let currentProfileUserId = null;
+    const PROFILE_CACHE_TTLS = {
+        author: 60000,
+        user: 45000,
+    };
 
     function getOrCreateOverlay() {
         if (overlay && document.body.contains(overlay)) return overlay;
@@ -202,10 +206,47 @@
 
     function getMediaUrl(url) {
         if (!url) return '';
-        if (typeof url === 'string' && url.startsWith('/web/cache')) return url;
-        var isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-        if (isMobile) return url;
-        return '/web/api/proxy?url=' + encodeURIComponent(url);
+        if (currentApp && currentApp.getMediaUrl) return currentApp.getMediaUrl(url);
+        if (typeof url === 'string' && url.includes('xhscdn.com') && url.startsWith('http://')) {
+            return 'https://' + url.slice('http://'.length);
+        }
+        return url;
+    }
+
+    function getAvatarUrl(url) {
+        if (!url) return '';
+        if (currentApp && currentApp.getAvatarUrl) return currentApp.getAvatarUrl(url);
+        return getMediaUrl(url);
+    }
+
+    function getNoteCoverUrl(note) {
+        if (!note) return '';
+        return getMediaUrl(note.raw_cover || note.cover || '');
+    }
+
+    function getCacheApi() {
+        return window.XHSUICache || null;
+    }
+
+    function getCacheScope() {
+        var token = (currentApp && currentApp.token) || localStorage.getItem('xhs_token') || '';
+        return token ? token.slice(-16) : 'guest';
+    }
+
+    function getProfileCacheKey(type, id) {
+        return 'profile:' + getCacheScope() + ':' + type + ':' + id;
+    }
+
+    function peekProfileCache(type, id) {
+        var cache = getCacheApi();
+        if (!cache || !id) return null;
+        return cache.peek(getProfileCacheKey(type, id), PROFILE_CACHE_TTLS[type] || 0);
+    }
+
+    function setProfileCache(type, id, data, options) {
+        var cache = getCacheApi();
+        if (!cache || !id) return;
+        cache.set(getProfileCacheKey(type, id), data, options || {});
     }
 
     async function open(authorId, authorName, appInstance) {
@@ -243,7 +284,7 @@
                 el.querySelector('.ap-name').textContent = data.author_name;
             }
 
-            var avatarUrl = getMediaUrl(data.avatar);
+            var avatarUrl = getAvatarUrl(data.avatar);
             if (avatarUrl) {
                 el.querySelector('.ap-avatar-large').src = avatarUrl;
             }
@@ -370,7 +411,7 @@
             var card = document.createElement('div');
             card.className = 'ap-work-card';
 
-            var coverUrl = getMediaUrl(note.cover || note.raw_cover || '');
+            var coverUrl = getNoteCoverUrl(note);
             var isVideo = note.type === 'video' || (note.videos && note.videos.length > 0);
 
             card.innerHTML =
@@ -464,7 +505,7 @@
             el.querySelector('.ap-name').textContent = data.nickname || '用户';
 
             if (data.avatar_url) {
-                var avatarUrl = getMediaUrl(data.avatar_url);
+                var avatarUrl = getAvatarUrl(data.avatar_url);
                 el.querySelector('.ap-avatar-large').src = avatarUrl;
             }
 
@@ -505,6 +546,362 @@
             }
         } catch (e) {
             el.querySelector('.ap-works-grid').innerHTML = '<div class="ap-loading">网络错误</div>';
+        }
+    }
+
+    /* function invalidateFollowingCache() {
+        var cache = getCacheApi();
+        if (!cache) return;
+        cache.remove('ms:' + getCacheScope() + ':following');
+    }
+
+    function renderAuthorProfileData(el, data, authorId, fallbackName) {
+        currentWorks = data.works || [];
+        currentAvatar = data.avatar || '';
+
+        var displayName = data.author_name || fallbackName || authorId;
+        el.querySelector('.ap-header-title').textContent = displayName;
+        el.querySelector('.ap-name').textContent = displayName;
+        el.querySelector('.ap-uid-text').textContent = '灏忕孩涔﹀彿: ' + String(authorId || '').slice(-8);
+
+        var avatarUrl = getAvatarUrl(data.avatar);
+        el.querySelector('.ap-avatar-large').src = avatarUrl || '';
+
+        renderTags(el, data.tags || []);
+        renderWorks(el, currentWorks);
+        el.querySelector('.ap-works-count').textContent = currentWorks.length + ' 绡?';
+
+        var ipLoc = '';
+        for (var i = 0; i < currentWorks.length; i++) {
+            var noteData = currentWorks[i].data;
+            if (noteData && noteData.ipLocation) {
+                ipLoc = noteData.ipLocation;
+                break;
+            }
+        }
+        el.querySelector('.ap-ip-location').textContent = ipLoc ? '馃搷 IP褰掑睘: ' + ipLoc : '';
+    }
+
+    function renderUserProfileData(el, data, userId, token) {
+        currentWorks = data.works || [];
+        currentAvatar = data.avatar_url || '';
+
+        el.querySelector('.ap-header-title').textContent = data.nickname || '鐢ㄦ埛';
+        el.querySelector('.ap-name').textContent = data.nickname || '鐢ㄦ埛';
+
+        if (data.avatar_url) {
+            el.querySelector('.ap-avatar-large').src = getAvatarUrl(data.avatar_url);
+        } else {
+            el.querySelector('.ap-avatar-large').src = '';
+        }
+
+        var followBtn = el.querySelector('.ap-follow-btn');
+        followBtn.textContent = data.is_following ? '宸插叧娉?' : '鍏虫敞';
+        followBtn.onclick = async function () {
+            var isFollowing = followBtn.textContent === '宸插叧娉?';
+            try {
+                if (isFollowing) {
+                    await fetch('/web/api/user/follow?target_id=' + userId + '&token=' + encodeURIComponent(token), { method: 'DELETE' });
+                    followBtn.textContent = '鍏虫敞';
+                    data.is_following = false;
+                } else {
+                    await fetch('/web/api/user/follow', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ target_id: userId, token: token }),
+                    });
+                    followBtn.textContent = '宸插叧娉?';
+                    data.is_following = true;
+                }
+                setProfileCache('user', userId, data);
+                invalidateFollowingCache();
+            } catch (e) {
+                if (window.showToast) window.showToast('鎿嶄綔澶辫触');
+            }
+        };
+
+        var chatBtn = el.querySelector('.ap-chat-btn');
+        chatBtn.onclick = function () {
+            if (window.ChatUI && window.ChatUI.openUserChat) {
+                window.ChatUI.openUserChat(userId, data.nickname, data.avatar_url);
+            }
+        };
+
+        el.querySelector('.ap-works-count').textContent = data.work_count + ' 绡?';
+        if (!data.is_mutual && currentWorks.length === 0 && data.work_count > 0) {
+            el.querySelector('.ap-works-grid').innerHTML =
+                '<div class="ap-loading" style="min-height:20vh;display:flex;align-items:center;justify-content:center;font-size:1.6vh">馃敀 鐩镐簰鍏虫敞鍚庡彲浠ユ煡鐪嬪鏂圭殑鍏歌棌浣滃搧闆?/div>';
+        } else {
+            renderWorks(el, currentWorks);
+        }
+    }
+
+    async function open(authorId, authorName, appInstance) {
+        currentAuthorId = authorId;
+        currentApp = appInstance;
+        var el = getOrCreateOverlay();
+        el.style.zIndex = window.nextOverlayZ();
+
+        el.querySelector('.ap-header-title').textContent = authorName;
+        el.querySelector('.ap-name').textContent = authorName;
+        el.querySelector('.ap-uid-text').textContent = '灏忕孩涔﹀彿: ' + String(authorId || '').slice(-8);
+        el.querySelector('.ap-ip-location').textContent = '';
+        el.querySelector('.ap-tags-scroll').innerHTML = '';
+        el.querySelector('.ap-works-grid').innerHTML = '<div class="ap-loading">鍔犺浇涓?..</div>';
+        el.querySelector('.ap-works-count').textContent = '';
+        el.querySelector('.ap-avatar-large').src = '';
+        el.querySelector('.ap-follow-btn').textContent = '鍏虫敞';
+
+        el.classList.add('ap-visible');
+        document.body.style.overflow = 'hidden';
+
+        var cached = peekProfileCache('author', authorId);
+        if (cached) {
+            renderAuthorProfileData(el, cached.data, authorId, authorName);
+        }
+
+        var token = (appInstance && appInstance.token) || localStorage.getItem('xhs_token') || '';
+        try {
+            var resp = await fetch('/web/api/author/detail?author_id=' + encodeURIComponent(authorId) + '&token=' + encodeURIComponent(token));
+            if (!resp.ok) {
+                if (!cached) {
+                    el.querySelector('.ap-works-grid').innerHTML = '<div class="ap-loading">鍔犺浇澶辫触</div>';
+                }
+                return;
+            }
+            var data = await resp.json();
+            setProfileCache('author', authorId, data, { persist: false, maxPersistBytes: 200 * 1024 });
+            renderAuthorProfileData(el, data, authorId, authorName);
+        } catch (e) {
+            if (!cached) {
+                el.querySelector('.ap-works-grid').innerHTML = '<div class="ap-loading">缃戠粶閿欒</div>';
+            }
+        }
+    }
+
+    async function openUserProfile(userId, appInstance) {
+        currentProfileMode = 'user';
+        currentProfileUserId = userId;
+        currentAuthorId = null;
+        currentApp = appInstance;
+        var el = getOrCreateOverlay();
+        el.style.zIndex = window.nextOverlayZ();
+
+        el.querySelector('.ap-header-title').textContent = '鍔犺浇涓?..';
+        el.querySelector('.ap-name').textContent = '';
+        el.querySelector('.ap-uid').style.display = 'none';
+        el.querySelector('.ap-ip-location').style.display = 'none';
+        el.querySelector('.ap-xhs-link').style.display = 'none';
+        el.querySelector('.ap-tags-section').style.display = 'none';
+        el.querySelector('.ap-works-grid').innerHTML = '<div class="ap-loading">鍔犺浇涓?..</div>';
+        el.querySelector('.ap-works-count').textContent = '';
+        el.querySelector('.ap-avatar-large').src = '';
+        el.querySelector('.ap-follow-btn').textContent = '鍏虫敞';
+        el.querySelector('.ap-add-friend').style.display = 'none';
+
+        el.classList.add('ap-visible');
+        document.body.style.overflow = 'hidden';
+
+        var cached = peekProfileCache('user', userId);
+        var token = (appInstance && appInstance.token) || localStorage.getItem('xhs_token') || '';
+        if (cached) {
+            renderUserProfileData(el, cached.data, userId, token);
+        }
+
+        try {
+            var resp = await fetch('/web/api/user/' + userId + '/profile?token=' + encodeURIComponent(token));
+            if (!resp.ok) {
+                if (!cached) {
+                    el.querySelector('.ap-works-grid').innerHTML = '<div class="ap-loading">鐢ㄦ埛涓嶅瓨鍦?/div>';
+                }
+                return;
+            }
+            var data = await resp.json();
+            setProfileCache('user', userId, data, { persist: false, maxPersistBytes: 200 * 1024 });
+            renderUserProfileData(el, data, userId, token);
+        } catch (e) {
+            if (!cached) {
+                el.querySelector('.ap-works-grid').innerHTML = '<div class="ap-loading">缃戠粶閿欒</div>';
+            }
+        }
+    }
+
+    */
+
+    function invalidateFollowingCache() {
+        var cache = getCacheApi();
+        if (!cache) return;
+        cache.remove('ms:' + getCacheScope() + ':following');
+    }
+
+    function renderAuthorProfileData(el, data, authorId, fallbackName) {
+        currentWorks = data.works || [];
+        currentAvatar = data.avatar || '';
+
+        var displayName = data.author_name || fallbackName || authorId;
+        el.querySelector('.ap-header-title').textContent = displayName;
+        el.querySelector('.ap-name').textContent = displayName;
+        el.querySelector('.ap-uid-text').textContent = 'XHS ID: ' + String(authorId || '').slice(-8);
+
+        var avatarUrl = getAvatarUrl(data.avatar);
+        el.querySelector('.ap-avatar-large').src = avatarUrl || '';
+
+        renderTags(el, data.tags || []);
+        renderWorks(el, currentWorks);
+        el.querySelector('.ap-works-count').textContent = currentWorks.length + ' posts';
+
+        var ipLoc = '';
+        for (var i = 0; i < currentWorks.length; i++) {
+            var noteData = currentWorks[i].data;
+            if (noteData && noteData.ipLocation) {
+                ipLoc = noteData.ipLocation;
+                break;
+            }
+        }
+        el.querySelector('.ap-ip-location').textContent = ipLoc ? 'IP: ' + ipLoc : '';
+    }
+
+    function renderUserProfileData(el, data, userId, token) {
+        currentWorks = data.works || [];
+        currentAvatar = data.avatar_url || '';
+
+        el.querySelector('.ap-header-title').textContent = data.nickname || 'User';
+        el.querySelector('.ap-name').textContent = data.nickname || 'User';
+
+        if (data.avatar_url) {
+            el.querySelector('.ap-avatar-large').src = getAvatarUrl(data.avatar_url);
+        } else {
+            el.querySelector('.ap-avatar-large').src = '';
+        }
+
+        var followBtn = el.querySelector('.ap-follow-btn');
+        followBtn.textContent = data.is_following ? 'Following' : 'Follow';
+        followBtn.onclick = async function () {
+            var isFollowing = followBtn.textContent === 'Following';
+            try {
+                if (isFollowing) {
+                    await fetch('/web/api/user/follow?target_id=' + userId + '&token=' + encodeURIComponent(token), { method: 'DELETE' });
+                    followBtn.textContent = 'Follow';
+                    data.is_following = false;
+                } else {
+                    await fetch('/web/api/user/follow', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ target_id: userId, token: token }),
+                    });
+                    followBtn.textContent = 'Following';
+                    data.is_following = true;
+                }
+                setProfileCache('user', userId, data);
+                invalidateFollowingCache();
+            } catch (e) {
+                if (window.showToast) window.showToast('Action failed');
+            }
+        };
+
+        var chatBtn = el.querySelector('.ap-chat-btn');
+        chatBtn.onclick = function () {
+            if (window.ChatUI && window.ChatUI.openUserChat) {
+                window.ChatUI.openUserChat(userId, data.nickname, data.avatar_url);
+            }
+        };
+
+        el.querySelector('.ap-works-count').textContent = data.work_count + ' posts';
+        if (!data.is_mutual && currentWorks.length === 0 && data.work_count > 0) {
+            el.querySelector('.ap-works-grid').innerHTML =
+                '<div class="ap-loading" style="min-height:20vh;display:flex;align-items:center;justify-content:center;font-size:1.6vh">Mutual follow required to view works</div>';
+        } else {
+            renderWorks(el, currentWorks);
+        }
+    }
+
+    async function open(authorId, authorName, appInstance) {
+        currentAuthorId = authorId;
+        currentApp = appInstance;
+        var el = getOrCreateOverlay();
+        el.style.zIndex = window.nextOverlayZ();
+
+        el.querySelector('.ap-header-title').textContent = authorName;
+        el.querySelector('.ap-name').textContent = authorName;
+        el.querySelector('.ap-uid-text').textContent = 'XHS ID: ' + String(authorId || '').slice(-8);
+        el.querySelector('.ap-ip-location').textContent = '';
+        el.querySelector('.ap-tags-scroll').innerHTML = '';
+        el.querySelector('.ap-works-grid').innerHTML = '<div class="ap-loading">Loading...</div>';
+        el.querySelector('.ap-works-count').textContent = '';
+        el.querySelector('.ap-avatar-large').src = '';
+        el.querySelector('.ap-follow-btn').textContent = 'Follow';
+
+        el.classList.add('ap-visible');
+        document.body.style.overflow = 'hidden';
+
+        var cached = peekProfileCache('author', authorId);
+        if (cached) {
+            renderAuthorProfileData(el, cached.data, authorId, authorName);
+        }
+
+        var token = (appInstance && appInstance.token) || localStorage.getItem('xhs_token') || '';
+        try {
+            var resp = await fetch('/web/api/author/detail?author_id=' + encodeURIComponent(authorId) + '&token=' + encodeURIComponent(token));
+            if (!resp.ok) {
+                if (!cached) {
+                    el.querySelector('.ap-works-grid').innerHTML = '<div class="ap-loading">Load failed</div>';
+                }
+                return;
+            }
+            var data = await resp.json();
+            setProfileCache('author', authorId, data, { persist: false, maxPersistBytes: 200 * 1024 });
+            renderAuthorProfileData(el, data, authorId, authorName);
+        } catch (e) {
+            if (!cached) {
+                el.querySelector('.ap-works-grid').innerHTML = '<div class="ap-loading">Network error</div>';
+            }
+        }
+    }
+
+    async function openUserProfile(userId, appInstance) {
+        currentProfileMode = 'user';
+        currentProfileUserId = userId;
+        currentAuthorId = null;
+        currentApp = appInstance;
+        var el = getOrCreateOverlay();
+        el.style.zIndex = window.nextOverlayZ();
+
+        el.querySelector('.ap-header-title').textContent = 'Loading...';
+        el.querySelector('.ap-name').textContent = '';
+        el.querySelector('.ap-uid').style.display = 'none';
+        el.querySelector('.ap-ip-location').style.display = 'none';
+        el.querySelector('.ap-xhs-link').style.display = 'none';
+        el.querySelector('.ap-tags-section').style.display = 'none';
+        el.querySelector('.ap-works-grid').innerHTML = '<div class="ap-loading">Loading...</div>';
+        el.querySelector('.ap-works-count').textContent = '';
+        el.querySelector('.ap-avatar-large').src = '';
+        el.querySelector('.ap-follow-btn').textContent = 'Follow';
+        el.querySelector('.ap-add-friend').style.display = 'none';
+
+        el.classList.add('ap-visible');
+        document.body.style.overflow = 'hidden';
+
+        var cached = peekProfileCache('user', userId);
+        var token = (appInstance && appInstance.token) || localStorage.getItem('xhs_token') || '';
+        if (cached) {
+            renderUserProfileData(el, cached.data, userId, token);
+        }
+
+        try {
+            var resp = await fetch('/web/api/user/' + userId + '/profile?token=' + encodeURIComponent(token));
+            if (!resp.ok) {
+                if (!cached) {
+                    el.querySelector('.ap-works-grid').innerHTML = '<div class="ap-loading">User not found</div>';
+                }
+                return;
+            }
+            var data = await resp.json();
+            setProfileCache('user', userId, data, { persist: false, maxPersistBytes: 200 * 1024 });
+            renderUserProfileData(el, data, userId, token);
+        } catch (e) {
+            if (!cached) {
+                el.querySelector('.ap-works-grid').innerHTML = '<div class="ap-loading">Network error</div>';
+            }
         }
     }
 
